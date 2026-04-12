@@ -12,6 +12,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 import { RemoteDashboard } from './components/RemoteDashboard';
 import { SmartHome, SmartHomeAppliance } from './components/SmartHome';
+import { PowerSankey } from './components/PowerSankey';
 
 interface BatteryCell {
   id: number;
@@ -35,13 +36,20 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const Battery3D = ({ 
   cell, 
   isSelected, 
-  onSelect 
+  onSelect,
+  isCharging,
+  isAiMonitoring
 }: { 
   cell: BatteryCell; 
   isSelected: boolean; 
-  onSelect: (cell: BatteryCell) => void 
+  onSelect: (cell: BatteryCell) => void;
+  isCharging: boolean;
+  isAiMonitoring: boolean;
 }) => {
   const meshRef = useRef<THREE.Mesh>(null);
+  const glowRef = useRef<THREE.Mesh>(null);
+  const pulseRef = useRef<THREE.Mesh>(null);
+  const aiGlowRef = useRef<THREE.Mesh>(null);
   
   // Lifting animation logic: ONLY on selection as requested
   const targetY = isSelected ? 1.5 : 0;
@@ -49,6 +57,25 @@ const Battery3D = ({
   useFrame((state, delta) => {
     if (meshRef.current) {
       meshRef.current.position.y = THREE.MathUtils.lerp(meshRef.current.position.y, targetY, 0.1);
+    }
+    if (glowRef.current && isCharging) {
+      const scale = 1 + Math.sin(state.clock.elapsedTime * 4) * 0.05;
+      glowRef.current.scale.set(scale, scale, scale);
+      glowRef.current.position.y = meshRef.current?.position.y || 0;
+    }
+    if (aiGlowRef.current && isAiMonitoring) {
+      const opacity = 0.1 + Math.sin(state.clock.elapsedTime * 2) * 0.1;
+      if (aiGlowRef.current.material instanceof THREE.MeshStandardMaterial) {
+        aiGlowRef.current.material.opacity = opacity;
+      }
+      aiGlowRef.current.position.y = meshRef.current?.position.y || 0;
+    }
+    if (pulseRef.current && isSelected) {
+      const s = 1 + Math.sin(state.clock.elapsedTime * 6) * 0.2;
+      pulseRef.current.scale.set(s, s, 1);
+      if (pulseRef.current.material instanceof THREE.MeshStandardMaterial) {
+        pulseRef.current.material.opacity = 0.6 - (Math.sin(state.clock.elapsedTime * 6) + 1) * 0.2;
+      }
     }
   });
 
@@ -60,7 +87,7 @@ const Battery3D = ({
       position={[
         (cell.id % 10) * 0.46 - 2.07, 
         0, 
-        Math.floor(cell.id / 10) * 0.46 - 1.61
+        Math.floor(cell.id / 10) * 0.46 - 2.07
       ]}
     >
       <mesh
@@ -78,21 +105,89 @@ const Battery3D = ({
           metalness={0.6}
           roughness={0.3}
         />
+
+        {/* Charging Glow */}
+        {isCharging && (
+          <mesh ref={glowRef}>
+            <cylinderGeometry args={[0.22, 0.22, 1.02, 32]} />
+            <meshStandardMaterial 
+              color="#fbbf24" 
+              transparent 
+              opacity={0.3}
+              emissive="#fbbf24"
+              emissiveIntensity={0.5}
+            />
+          </mesh>
+        )}
+
+        {/* AI Monitoring Scan Glow */}
+        {isAiMonitoring && (
+          <mesh ref={aiGlowRef}>
+            <cylinderGeometry args={[0.23, 0.23, 1.05, 32]} />
+            <meshStandardMaterial 
+              color="#a855f7" 
+              transparent 
+              opacity={0.1}
+              emissive="#a855f7"
+              emissiveIntensity={0.3}
+            />
+          </mesh>
+        )}
         
         {/* Parameter HUD - Only on selection */}
+        <Html distanceFactor={8} position={[0, 1.2, 0]} center>
+          <AnimatePresence>
+            {isSelected && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+                className="bg-zinc-950/95 border border-blue-500/40 p-3 rounded-xl shadow-2xl backdrop-blur-md pointer-events-none min-w-[100px]"
+              >
+                <div className="text-blue-400 text-[10px] font-black mb-2 tracking-tight">{cell.name}</div>
+                <div className="h-px bg-zinc-800 mb-2 w-full" />
+                <div className="flex flex-col gap-1.5 font-mono text-[9px]">
+                  <div className="flex justify-between gap-4">
+                    <span className="text-zinc-500">VOLT:</span>
+                    <span className="text-white font-bold">{cell.voltage.toFixed(2)}V</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-zinc-500">CURR:</span>
+                    <span className="text-white font-bold">{cell.current.toFixed(1)}A</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-zinc-500">TEMP:</span>
+                    <span className={`${cell.temperature > 50 ? 'text-red-400' : 'text-white'} font-bold`}>
+                      {cell.temperature.toFixed(2)}°C
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-zinc-500">SOC:</span>
+                    <span className="text-white font-bold">{cell.soc}%</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-zinc-500">SOH:</span>
+                    <span className="text-white font-bold">{cell.soh}%</span>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </Html>
+
+        {/* Selection Pulse Ring at Base */}
         {isSelected && (
-          <Html distanceFactor={10} position={[0, 1.0, 0]} center>
-            <div className="bg-black/90 border border-blue-500/50 p-2 rounded text-[8px] font-mono text-white whitespace-nowrap shadow-2xl backdrop-blur-sm pointer-events-none">
-              <div className="text-blue-400 font-bold mb-1 border-b border-blue-500/20 pb-1">{cell.name}</div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                <span className="text-zinc-500">VOLT:</span> <span className="text-white">{cell.voltage.toFixed(2)}V</span>
-                <span className="text-zinc-500">CURR:</span> <span className="text-white">{cell.current.toFixed(1)}A</span>
-                <span className="text-zinc-500">TEMP:</span> <span className={`${cell.temperature > 50 ? 'text-red-400' : 'text-white'}`}>{cell.temperature}°C</span>
-                <span className="text-zinc-500">SOC:</span> <span className="text-white">{cell.soc}%</span>
-                <span className="text-zinc-500">SOH:</span> <span className="text-white">{cell.soh}%</span>
-              </div>
-            </div>
-          </Html>
+          <mesh ref={pulseRef} position={[0, -0.49, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[0.25, 0.35, 32]} />
+            <meshStandardMaterial 
+              color="#3b82f6" 
+              transparent 
+              opacity={0.5} 
+              emissive="#3b82f6" 
+              emissiveIntensity={1}
+            />
+          </mesh>
         )}
 
         {/* Realistic Battery Details */}
@@ -118,12 +213,14 @@ const BatteryStack3D = ({
   cells, 
   selectedCell, 
   onSelect,
-  timeOfDay
+  timeOfDay,
+  isAiMonitoring
 }: { 
   cells: BatteryCell[]; 
   selectedCell: BatteryCell | null; 
   onSelect: (cell: BatteryCell) => void;
   timeOfDay: string;
+  isAiMonitoring: boolean;
 }) => {
   const envPreset = timeOfDay === 'night' ? 'night' : timeOfDay === 'noon' ? 'city' : 'sunset';
   
@@ -133,6 +230,12 @@ const BatteryStack3D = ({
         <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-zinc-500 bg-black/50 px-2 py-1 rounded backdrop-blur-sm border border-zinc-800">
           3D Precision Stack • Click to Inspect
         </div>
+        {isAiMonitoring && (
+          <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.2em] text-purple-400 bg-purple-500/10 px-2 py-1 rounded backdrop-blur-sm border border-purple-500/30 animate-pulse">
+            <Brain className="w-3 h-3" />
+            AI Analysis Active
+          </div>
+        )}
       </div>
       <Canvas shadows dpr={[1, 2]}>
         <PerspectiveCamera makeDefault position={[10, 10, 10]} fov={35} />
@@ -156,6 +259,8 @@ const BatteryStack3D = ({
               cell={cell} 
               isSelected={selectedCell?.id === cell.id}
               onSelect={onSelect}
+              isCharging={timeOfDay !== 'night'}
+              isAiMonitoring={isAiMonitoring}
             />
           ))}
           
@@ -268,20 +373,16 @@ export default function App() {
   const [powerSource, setPowerSource] = useState<'battery' | 'solar'>('battery');
 
   const [smartHomeAppliances, setSmartHomeAppliances] = useState<SmartHomeAppliance[]>([
-    { id: 'l1', name: 'Light 1', type: 'light', power: 10, isOn: false, x: 10, y: 25 },
-    { id: 'f1', name: 'Fan 1', type: 'fan', power: 60, isOn: false, x: 50, y: 20 },
-    { id: 'l2', name: 'Light 2', type: 'light', power: 10, isOn: false, x: 90, y: 25 },
-    { id: 'l7', name: 'Light 7', type: 'light', power: 10, isOn: false, x: 95, y: 10 },
-    { id: 'l3a', name: 'Light 3 (Wall)', type: 'light', power: 10, isOn: false, x: 5, y: 65 },
-    { id: 'l3b', name: 'Light 3 (Top)', type: 'light', power: 10, isOn: false, x: 35, y: 55 },
-    { id: 'ref', name: 'Refrigerator', type: 'refrigerator', power: 150, isOn: true, x: 15, y: 85 },
-    { id: 'wm', name: 'Washing Machine', type: 'washing_machine', power: 500, isOn: false, x: 35, y: 85 },
-    { id: 'l4', name: 'Light 4', type: 'light', power: 10, isOn: false, x: 50, y: 55 },
-    { id: 'f2', name: 'Fan 2', type: 'fan', power: 60, isOn: false, x: 75, y: 55 },
-    { id: 'tv', name: 'TV', type: 'tv', power: 100, isOn: false, x: 75, y: 75 },
-    { id: 'l5', name: 'Stand Light 5', type: 'light', power: 15, isOn: false, x: 55, y: 85 },
-    { id: 'l6', name: 'Light 6', type: 'light', power: 10, isOn: false, x: 95, y: 65 },
-    { id: 'ac1', name: 'Air Conditioner', type: 'air_conditioner', power: 1500, isOn: false, x: 50, y: 85 },
+    { id: 'l1', name: 'Living Room Light', type: 'light', power: 40, isOn: false, x: 25, y: 25 },
+    { id: 'tv1', name: 'Smart TV', type: 'tv', power: 150, isOn: false, x: 50, y: 40 },
+    { id: 'ac1', name: 'Air Conditioner', type: 'air_conditioner', power: 1500, isOn: false, x: 50, y: 20 },
+    { id: 'ref1', name: 'Refrigerator', type: 'refrigerator', power: 200, isOn: true, x: 85, y: 75 },
+    { id: 'l2', name: 'Kitchen Light', type: 'light', power: 40, isOn: false, x: 75, y: 75 },
+    { id: 'wm1', name: 'Washing Machine', type: 'washing_machine', power: 500, isOn: false, x: 15, y: 85 },
+    { id: 'f1', name: 'Ceiling Fan', type: 'fan', power: 75, isOn: false, x: 25, y: 75 },
+    { id: 'f3', name: 'Fan 3', type: 'fan', power: 75, isOn: false, x: 75, y: 25 },
+    { id: 'l8', name: 'Light 8', type: 'light', power: 40, isOn: false, x: 10, y: 10 },
+    { id: 'l9', name: 'Light 9', type: 'light', power: 40, isOn: false, x: 90, y: 90 },
   ]);
 
   const toggleAppliance = async (id: string) => {
@@ -509,13 +610,30 @@ export default function App() {
   const runAiAnalysis = async () => {
     setIsAiAnalyzing(true);
     lastAiAnalysisTime.current = Date.now();
+    
+    // Pre-process data to find outliers (single cell variances)
+    const avgVolt = cells.reduce((acc, c) => acc + c.voltage, 0) / cells.length;
+    const avgTemp = cells.reduce((acc, c) => acc + c.temperature, 0) / cells.length;
+    
+    const outliers = cells.filter(c => 
+      Math.abs(c.voltage - avgVolt) > 0.1 || 
+      Math.abs(c.temperature - avgTemp) > 5
+    ).slice(0, 10); // Limit to top 10 outliers for prompt length
+
     try {
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Analyze this 10x8 battery pack data (80 cells). 
-        Identify anomalies, provide status (normal, warning, critical), an alert message, and a recommendation.
+        contents: `Analyze this 10x10 battery pack data (100 cells). 
+        CRITICAL: You must alert if ANY single cell shows variance from the pack average (e.g., voltage deviation > 0.1V or temperature deviation > 5°C).
+        Focus on Battery Health (SOH), SOC balance, and thermal stability.
+        Identify anomalies, provide status (normal, warning, critical), a detailed health report message, and a technical recommendation.
+        
+        System Context:
         Power Source: ${powerSource}, Solar: ${solarVoltage}V, Smart Home Load: ${smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0)}W.
-        Data: ${JSON.stringify(cells.slice(0, 20))}... (analyzing first 20 for brevity, assume similar patterns)`,
+        
+        Representative Sample: ${JSON.stringify(cells.slice(0, 15))}
+        Detected Outliers (Single Cell Variances): ${JSON.stringify(outliers)}
+        (If outliers are present, prioritize reporting them immediately)`,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -686,6 +804,7 @@ const MainApp = ({
   setShowRuntimeGraph, getRuntimeProjectionData
 }: any) => {
   const navigate = useNavigate();
+  const totalLoadPower = smartHomeAppliances.reduce((acc, app: any) => acc + (app.isOn ? app.power : 0), 0);
   
   if (loading) {
     return (
@@ -709,7 +828,7 @@ const MainApp = ({
             </span>
           </div>
           <h1 className="text-3xl md:text-4xl font-bold tracking-tighter text-white">
-            VIRTUAL <span className="text-emerald-500">BATTERY</span> PACK <span className="text-zinc-700 text-2xl">10x8</span>
+            VIRTUAL <span className="text-emerald-500">BATTERY</span> PACK <span className="text-zinc-700 text-2xl">10x10</span>
           </h1>
         </div>
 
@@ -1000,7 +1119,7 @@ const MainApp = ({
           </AnimatePresence>
         </div>
 
-        {/* Middle Column: 10x8 Grid or 3D Stack or Detailed Distribution */}
+        {/* Middle Column: 10x10 Grid or 3D Stack or Detailed Distribution */}
         <div className="xl:col-span-2">
           <div className="flex gap-2 mb-4 bg-zinc-900/50 p-1 rounded-xl border border-zinc-800 w-fit">
             <button 
@@ -1030,6 +1149,7 @@ const MainApp = ({
                 selectedCell={selectedCell} 
                 onSelect={setSelectedCell} 
                 timeOfDay={timeOfDay}
+                isAiMonitoring={isAiMonitoring}
               />
             ) : (
               <div className="bg-zinc-900/20 border border-zinc-800/50 p-4 rounded-3xl">
@@ -1040,9 +1160,16 @@ const MainApp = ({
                       whileHover={{ scale: 1.1, zIndex: 10 }}
                       whileTap={{ scale: 0.9 }}
                       onClick={() => setSelectedCell(cell)}
-                      className={`relative flex flex-col items-center justify-center p-1 rounded-full border transition-all aspect-square ${getStatusColor(cell)} ${selectedCell?.id === cell.id ? 'ring-1 ring-white ring-offset-2 ring-offset-[#0a0a0a]' : ''}`}
+                      className={`relative flex flex-col items-center justify-center p-1 rounded-full border transition-all aspect-square ${getStatusColor(cell)} ${selectedCell?.id === cell.id ? 'ring-1 ring-white ring-offset-2 ring-offset-[#0a0a0a]' : ''} ${timeOfDay !== 'night' ? 'shadow-[0_0_15px_rgba(251,191,36,0.2)]' : ''}`}
                     >
-                      <Battery className="w-3 h-3 md:w-4 md:h-4" />
+                      {timeOfDay !== 'night' && (
+                        <motion.div
+                          animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.6, 0.3] }}
+                          transition={{ duration: 2, repeat: Infinity }}
+                          className="absolute inset-0 rounded-full bg-yellow-400/20"
+                        />
+                      )}
+                      <Battery className={`w-3 h-3 md:w-4 md:h-4 ${timeOfDay !== 'night' ? 'text-yellow-500' : ''}`} />
                       <div className="text-[6px] md:text-[8px] font-bold mt-0.5">{cell.voltage.toFixed(1)}V</div>
                       <div className="text-[5px] md:text-[6px] opacity-50">{cell.soc}%</div>
                       
@@ -1134,250 +1261,40 @@ const MainApp = ({
                 </div>
               </div>
 
-              {/* Detailed Flow Diagram */}
+              {/* Detailed Flow Diagram (Sankey) */}
               <div className="bg-zinc-950 p-8 rounded-2xl border border-zinc-800 relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-yellow-500 via-emerald-500 to-orange-500 opacity-20" />
                 
-                <div className="flex flex-col items-center gap-4">
-                  {/* Top Row: Sources */}
-                  {/* Power Flow Diagram Container */}
-                  <div className="relative w-full max-w-3xl aspect-[16/10] bg-zinc-950/50 rounded-[40px] border border-zinc-800/50 overflow-hidden shadow-2xl backdrop-blur-sm">
-                    {/* Circuit Background Pattern */}
-                    <div className="absolute inset-0 opacity-10 pointer-events-none">
-                      <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(#3f3f46 1px, transparent 1px)', backgroundSize: '30px 30px' }} />
-                      <svg className="w-full h-full">
-                        <pattern id="circuit" x="0" y="0" width="100" height="100" patternUnits="userSpaceOnUse">
-                          <path d="M 10 10 L 90 10 M 10 10 L 10 90" stroke="currentColor" fill="none" strokeWidth="0.5" />
-                          <circle cx="10" cy="10" r="1.5" fill="currentColor" />
-                        </pattern>
-                        <rect width="100%" height="100%" fill="url(#circuit)" />
-                      </svg>
+                <div className="flex flex-col items-center gap-8">
+                  <div className="text-center">
+                    <h3 className="text-xs font-mono uppercase tracking-[0.3em] text-zinc-500 mb-2">Real-time Energy Flow (Sankey)</h3>
+                    <div className="h-px w-24 bg-zinc-800 mx-auto" />
+                  </div>
+
+                  <div className="w-full max-w-3xl aspect-[16/8] bg-zinc-900/20 rounded-3xl border border-zinc-800/50 p-8 flex items-center justify-center">
+                    <PowerSankey 
+                      solarPower={solarVoltage * 0.5}
+                      batteryPower={totalLoadPower - (solarVoltage * 0.5)}
+                      loadPower={totalLoadPower}
+                      width={700}
+                      height={300}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-12 w-full max-w-2xl">
+                    <div className="text-center">
+                      <div className="text-[10px] font-mono text-zinc-600 uppercase mb-1">Generation</div>
+                      <div className="text-sm font-bold text-yellow-500">{(solarVoltage * 0.5).toFixed(1)}W</div>
                     </div>
-
-                    {/* Main SVG Layer for Paths */}
-                    <svg viewBox="0 0 1000 600" className="absolute inset-0 w-full h-full pointer-events-none">
-                      <defs>
-                        <filter id="glow">
-                          <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-                          <feMerge>
-                            <feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/>
-                          </feMerge>
-                        </filter>
-                        <linearGradient id="solarGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                          <stop offset="0%" stopColor="#fbbf24" />
-                          <stop offset="100%" stopColor="#f59e0b" />
-                        </linearGradient>
-                        <linearGradient id="batteryGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                          <stop offset="0%" stopColor="#10b981" />
-                          <stop offset="100%" stopColor="#059669" />
-                        </linearGradient>
-                        <linearGradient id="loadGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                          <stop offset="0%" stopColor="#f97316" />
-                          <stop offset="100%" stopColor="#ea580c" />
-                        </linearGradient>
-                      </defs>
-
-                      {/* Connection Paths with Glow */}
-                      <path 
-                        d="M 200 120 L 200 250 Q 200 300 300 300 L 500 300" 
-                        stroke={powerSource === 'solar' ? '#fbbf24' : '#27272a'} 
-                        strokeWidth="4" fill="none" strokeLinecap="round"
-                        className="transition-colors duration-1000"
-                        filter={powerSource === 'solar' ? 'url(#glow)' : ''}
-                        strokeOpacity={powerSource === 'solar' ? 0.6 : 0.2}
-                      />
-                      <path 
-                        d="M 800 120 L 800 250 Q 800 300 700 300 L 500 300" 
-                        stroke={powerSource === 'battery' ? '#10b981' : '#27272a'} 
-                        strokeWidth="4" fill="none" strokeLinecap="round"
-                        className="transition-colors duration-1000"
-                        filter={powerSource === 'battery' ? 'url(#glow)' : ''}
-                        strokeOpacity={powerSource === 'battery' ? 0.6 : 0.2}
-                      />
-                      <path 
-                        d="M 500 300 L 500 480" 
-                        stroke={smartHomeAppliances.some(a => a.isOn) ? '#f97316' : '#27272a'} 
-                        strokeWidth="4" fill="none" strokeLinecap="round"
-                        className="transition-colors duration-1000"
-                        filter={smartHomeAppliances.some(a => a.isOn) ? 'url(#glow)' : ''}
-                        strokeOpacity={smartHomeAppliances.some(a => a.isOn) ? 0.6 : 0.2}
-                      />
-                    </svg>
-
-                    {/* Flow Particles */}
-                    <div className="absolute inset-0 pointer-events-none">
-                      {/* Solar Flow */}
-                      {powerSource === 'solar' && solarVoltage > 0 && [0, 1, 2].map((i) => (
-                        <motion.div
-                          key={`solar-p-${i}`}
-                          className="absolute w-1.5 h-1.5 rounded-full bg-yellow-400 shadow-[0_0_10px_#fbbf24]"
-                          initial={{ offsetDistance: "0%", opacity: 0 }}
-                          animate={{ 
-                            offsetDistance: "100%", 
-                            opacity: [0, 1, 1, 0] 
-                          }}
-                          transition={{ 
-                            duration: 2, 
-                            repeat: Infinity, 
-                            delay: i * 0.6,
-                            ease: "linear" 
-                          }}
-                          style={{ 
-                            offsetPath: "path('M 200 120 L 200 250 Q 200 300 300 300 L 500 300')" 
-                          }}
-                        />
-                      ))}
-
-                      {/* Battery Flow */}
-                      {powerSource === 'battery' && [0, 1, 2].map((i) => (
-                        <motion.div
-                          key={`battery-p-${i}`}
-                          className="absolute w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#10b981]"
-                          initial={{ offsetDistance: "0%", opacity: 0 }}
-                          animate={{ 
-                            offsetDistance: "100%", 
-                            opacity: [0, 1, 1, 0] 
-                          }}
-                          transition={{ 
-                            duration: 2, 
-                            repeat: Infinity, 
-                            delay: i * 0.6,
-                            ease: "linear" 
-                          }}
-                          style={{ 
-                            offsetPath: "path('M 800 120 L 800 250 Q 800 300 700 300 L 500 300')" 
-                          }}
-                        />
-                      ))}
-
-                      {/* Load Flow */}
-                      {smartHomeAppliances.some(a => a.isOn) && [0, 1, 2, 3].map((i) => (
-                        <motion.div
-                          key={`load-p-${i}`}
-                          className="absolute w-1.5 h-1.5 rounded-full bg-orange-400 shadow-[0_0_10px_#f97316]"
-                          initial={{ offsetDistance: "0%", opacity: 0 }}
-                          animate={{ 
-                            offsetDistance: "100%", 
-                            opacity: [0, 1, 1, 0] 
-                          }}
-                          transition={{ 
-                            duration: 1.2, 
-                            repeat: Infinity, 
-                            delay: i * 0.3,
-                            ease: "linear" 
-                          }}
-                          style={{ 
-                            offsetPath: "path('M 500 300 L 500 480')" 
-                          }}
-                        />
-                      ))}
+                    <div className="text-center">
+                      <div className="text-[10px] font-mono text-zinc-600 uppercase mb-1">Storage Delta</div>
+                      <div className={`text-sm font-bold ${(totalLoadPower - (solarVoltage * 0.5)) < 0 ? 'text-emerald-500' : 'text-red-400'}`}>
+                        {(totalLoadPower - (solarVoltage * 0.5)).toFixed(1)}W
+                      </div>
                     </div>
-
-                    {/* Components Overlay */}
-                    <div className="absolute inset-0 flex flex-col items-center justify-between py-12 px-20">
-                      {/* Top Row */}
-                      <div className="flex justify-between w-full">
-                        {/* Solar */}
-                        <motion.div 
-                          whileHover={{ scale: 1.05 }}
-                          className="flex flex-col items-center gap-3 group cursor-pointer"
-                        >
-                          <div className={`relative p-6 rounded-3xl border-2 transition-all duration-500 ${powerSource === 'solar' ? 'border-yellow-500 bg-yellow-500/10 shadow-[0_0_40px_rgba(234,179,8,0.3)]' : 'border-zinc-800 bg-zinc-900/50'}`}>
-                            <Sun className={`w-10 h-10 ${powerSource === 'solar' ? 'text-yellow-500 animate-pulse' : 'text-zinc-700'}`} />
-                            {powerSource === 'solar' && (
-                              <div className="absolute -inset-1 rounded-3xl border border-yellow-500/50 animate-ping opacity-20" />
-                            )}
-                          </div>
-                          <div className="text-center">
-                            <div className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 mb-1">Solar Array</div>
-                            <div className="text-lg font-black text-yellow-500 leading-none">{solarVoltage}V</div>
-                            <div className="text-[10px] font-mono text-zinc-600 mt-1">{(solarVoltage * 0.5).toFixed(1)}W</div>
-                          </div>
-                        </motion.div>
-
-                        {/* Battery */}
-                        <motion.div 
-                          whileHover={{ scale: 1.05 }}
-                          className="flex flex-col items-center gap-3 group cursor-pointer"
-                        >
-                          <div className={`relative p-6 rounded-3xl border-2 transition-all duration-500 ${powerSource === 'battery' ? 'border-emerald-500 bg-emerald-500/10 shadow-[0_0_40px_rgba(34,197,94,0.3)]' : 'border-zinc-800 bg-zinc-900/50'}`}>
-                            <Battery className={`w-10 h-10 ${powerSource === 'battery' ? 'text-emerald-500 animate-pulse' : 'text-zinc-700'}`} />
-                            {powerSource === 'battery' && (
-                              <div className="absolute -inset-1 rounded-3xl border border-emerald-500/50 animate-ping opacity-20" />
-                            )}
-                          </div>
-                          <div className="text-center">
-                            <div className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 mb-1">Battery Pack</div>
-                            <div className="text-lg font-black text-emerald-500 leading-none">{totalVoltage}V</div>
-                            <div className="text-[10px] font-mono text-zinc-600 mt-1">{(Number(totalVoltage) * 2).toFixed(1)}W</div>
-                          </div>
-                        </motion.div>
-                      </div>
-
-                      {/* Middle Row: Hub */}
-                      <div className="relative">
-                        <motion.div 
-                          key={powerSource}
-                          initial={{ scale: 0.95, opacity: 0.8 }}
-                          animate={{ 
-                            scale: 1,
-                            opacity: 1,
-                            boxShadow: powerSource === 'solar' 
-                              ? "0 0 50px rgba(234,179,8,0.2)" 
-                              : "0 0 50px rgba(34,197,94,0.2)" 
-                          }}
-                          transition={{ duration: 0.5, type: "spring", stiffness: 100 }}
-                          className="p-6 bg-zinc-900/90 border-2 border-zinc-700 rounded-[32px] shadow-2xl backdrop-blur-xl flex flex-col items-center gap-4 min-w-[200px] relative z-20"
-                        >
-                          <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 bg-zinc-800 border border-zinc-700 rounded-full text-[8px] font-mono text-zinc-400 uppercase tracking-[0.3em] whitespace-nowrap">
-                            Switching Hub v2.0
-                          </div>
-                          
-                          <div className="flex items-center gap-4 w-full">
-                            <div className={`w-3 h-3 rounded-full shadow-[0_0_10px_currentColor] ${powerSource === 'solar' ? 'text-yellow-500 bg-yellow-500' : 'text-emerald-500 bg-emerald-500'} animate-pulse`} />
-                            <div className="flex-1">
-                              <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest mb-1">Active Source</div>
-                              <div className={`text-sm font-black uppercase tracking-widest ${powerSource === 'solar' ? 'text-yellow-500' : 'text-emerald-500'}`}>
-                                {powerSource}
-                              </div>
-                            </div>
-                            <ArrowRightLeft className="w-5 h-5 text-zinc-600" />
-                          </div>
-
-                          <div className="w-full h-px bg-zinc-800" />
-
-                          <div className="flex justify-between w-full text-[10px] font-mono">
-                            <span className="text-zinc-500 uppercase">Efficiency</span>
-                            <span className="text-emerald-400">98.4%</span>
-                          </div>
-                        </motion.div>
-
-                        {/* Decorative Hub Rings */}
-                        <div className="absolute inset-0 -m-4 border border-zinc-800/50 rounded-[40px] pointer-events-none" />
-                        <div className="absolute inset-0 -m-8 border border-zinc-800/20 rounded-[48px] pointer-events-none" />
-                      </div>
-
-                      {/* Bottom Row: Load */}
-                      <motion.div 
-                        whileHover={{ scale: 1.05 }}
-                        className="flex flex-col items-center gap-4 group cursor-pointer"
-                      >
-                        <div className={`relative p-8 rounded-[40px] border-2 transition-all duration-500 ${smartHomeAppliances.some(a => a.isOn) ? 'border-orange-500 bg-orange-500/10 shadow-[0_0_60px_rgba(249,115,22,0.3)]' : 'border-zinc-800 bg-zinc-900/50'}`}>
-                          <Zap className={`w-12 h-12 ${smartHomeAppliances.some(a => a.isOn) ? 'text-orange-500 animate-pulse' : 'text-zinc-800'}`} />
-                          {smartHomeAppliances.some(a => a.isOn) && (
-                            <div className="absolute -inset-2 rounded-[44px] border border-orange-500/30 animate-ping opacity-20" />
-                          )}
-                        </div>
-                        <div className="text-center">
-                          <div className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 mb-1">Smart Home Load</div>
-                          <div className="text-2xl font-black text-orange-500 leading-none">
-                            {smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0).toFixed(1)}W
-                          </div>
-                          <div className="text-[10px] font-mono text-zinc-600 mt-2 uppercase tracking-tighter">
-                            {Math.min(250, powerSource === 'solar' ? solarVoltage : Number(totalVoltage)).toFixed(0)}V System
-                          </div>
-                        </div>
-                      </motion.div>
+                    <div className="text-center">
+                      <div className="text-[10px] font-mono text-zinc-600 uppercase mb-1">Consumption</div>
+                      <div className="text-sm font-bold text-orange-500">{totalLoadPower.toFixed(1)}W</div>
                     </div>
                   </div>
                 </div>
@@ -1502,7 +1419,7 @@ const MainApp = ({
         <div className="flex gap-6">
           <a href="/api/battery-pack" target="_blank" className="hover:text-emerald-500 transition-colors">API</a>
           <span className="text-zinc-800">|</span>
-          <span>Grid: 10x8 (80 Cells)</span>
+          <span>Grid: 10x10 (100 Cells)</span>
         </div>
       </footer>
     </div>

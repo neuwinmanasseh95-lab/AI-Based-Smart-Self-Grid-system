@@ -22,12 +22,15 @@ async function startServer() {
     } else {
       const defaultAppliances = [
         { id: 'l1', name: 'Living Room Light', type: 'light', power: 40, isOn: false, x: 25, y: 25 },
-        { id: 'l2', name: 'Kitchen Light', type: 'light', power: 40, isOn: false, x: 75, y: 25 },
-        { id: 'f1', name: 'Ceiling Fan', type: 'fan', power: 75, isOn: false, x: 25, y: 75 },
         { id: 'tv1', name: 'Smart TV', type: 'tv', power: 150, isOn: false, x: 50, y: 40 },
+        { id: 'ac1', name: 'Air Conditioner', type: 'air_conditioner', power: 1500, isOn: false, x: 50, y: 20 },
         { id: 'ref1', name: 'Refrigerator', type: 'refrigerator', power: 200, isOn: true, x: 85, y: 75 },
+        { id: 'l2', name: 'Kitchen Light', type: 'light', power: 40, isOn: false, x: 75, y: 75 },
         { id: 'wm1', name: 'Washing Machine', type: 'washing_machine', power: 500, isOn: false, x: 15, y: 85 },
-        { id: 'ac1', name: 'Air Conditioner', type: 'air_conditioner', power: 1500, isOn: false, x: 50, y: 85 },
+        { id: 'f1', name: 'Ceiling Fan', type: 'fan', power: 75, isOn: false, x: 25, y: 75 },
+        { id: 'f3', name: 'Fan 3', type: 'fan', power: 75, isOn: false, x: 75, y: 25 },
+        { id: 'l8', name: 'Light 8', type: 'light', power: 40, isOn: false, x: 10, y: 10 },
+        { id: 'l9', name: 'Light 9', type: 'light', power: 40, isOn: false, x: 90, y: 90 },
       ];
       res.json(defaultAppliances);
     }
@@ -80,8 +83,8 @@ async function startServer() {
       const data = fs.readFileSync(DATA_FILE, "utf-8");
       res.json(JSON.parse(data));
     } else {
-      // Return default 10x8 grid if no data exists
-      const defaultData = Array.from({ length: 80 }, (_, i) => ({
+      // Return default 10x10 grid if no data exists
+      const defaultData = Array.from({ length: 100 }, (_, i) => ({
         id: i,
         name: `Cell ${i + 1}`,
         voltage: 3.7,
