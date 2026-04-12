@@ -9,14 +9,15 @@ import {
   Clock,
   ArrowLeft,
   Power,
-  Battery
+  Battery,
+  Wind
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export interface SmartHomeAppliance {
   id: string;
   name: string;
-  type: 'light' | 'fan' | 'tv' | 'refrigerator' | 'washing_machine';
+  type: 'light' | 'fan' | 'tv' | 'refrigerator' | 'washing_machine' | 'air_conditioner';
   power: number; // Watts
   isOn: boolean;
   x: number; // % from left
@@ -140,6 +141,35 @@ export const SmartHome = ({ appliances, onToggle, onBack, estimatedTime }: Smart
               className="absolute inset-0 border border-white/5 rounded-lg"
             />
           )}
+        </div>
+      );
+      case 'air_conditioner': return (
+        <div className={`relative w-14 h-8 rounded-md border-2 transition-all duration-500 ${isOn ? 'border-cyan-400 bg-zinc-800 shadow-[0_0_20px_rgba(34,211,238,0.3)]' : 'border-zinc-800 bg-zinc-900'}`}>
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Wind className={`${isOn ? 'text-cyan-400' : 'text-zinc-700'} w-6 h-6 ${isOn ? 'animate-pulse' : ''}`} />
+          </div>
+          {isOn && (
+            <>
+              {/* Air Flow Particles */}
+              {[0, 1, 2].map((i) => (
+                <motion.div
+                  key={i}
+                  initial={{ x: 0, opacity: 0 }}
+                  animate={{ x: 20, opacity: [0, 1, 0] }}
+                  transition={{ repeat: Infinity, duration: 1, delay: i * 0.3 }}
+                  className="absolute right-0 top-1/2 w-2 h-0.5 bg-cyan-400/50 rounded-full"
+                  style={{ top: `${30 + i * 20}%` }}
+                />
+              ))}
+              {/* Compressor Vibration */}
+              <motion.div 
+                animate={{ y: [-0.5, 0.5, -0.5] }}
+                transition={{ repeat: Infinity, duration: 0.05 }}
+                className="absolute inset-0 border border-cyan-400/20 rounded-md"
+              />
+            </>
+          )}
+          <div className="absolute bottom-1 left-2 right-2 h-0.5 bg-zinc-700 rounded-full opacity-50" />
         </div>
       );
       default: return <Zap className={`${color} w-6 h-6`} />;

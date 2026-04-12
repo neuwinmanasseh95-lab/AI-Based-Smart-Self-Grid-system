@@ -281,6 +281,7 @@ export default function App() {
     { id: 'tv', name: 'TV', type: 'tv', power: 100, isOn: false, x: 75, y: 75 },
     { id: 'l5', name: 'Stand Light 5', type: 'light', power: 15, isOn: false, x: 55, y: 85 },
     { id: 'l6', name: 'Light 6', type: 'light', power: 10, isOn: false, x: 95, y: 65 },
+    { id: 'ac1', name: 'Air Conditioner', type: 'air_conditioner', power: 1500, isOn: false, x: 50, y: 85 },
   ]);
 
   const toggleAppliance = async (id: string) => {
@@ -1015,12 +1016,6 @@ const MainApp = ({
               Detailed Distribution
             </button>
             <button 
-              onClick={() => setActiveView('remote')}
-              className={`px-4 py-1.5 rounded-lg text-[10px] font-mono uppercase tracking-widest transition-all ${activeView === 'remote' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-            >
-              Remote Dashboard
-            </button>
-            <button 
               onClick={() => setActiveView('smarthome')}
               className={`px-4 py-1.5 rounded-lg text-[10px] font-mono uppercase tracking-widest transition-all ${activeView === 'smarthome' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
             >
@@ -1491,31 +1486,6 @@ const MainApp = ({
               </div>
             )}
           </AnimatePresence>
-
-          {/* Remote Dashboard Link Card */}
-          <motion.div 
-            whileHover={{ scale: 1.02 }}
-            className="bg-gradient-to-br from-zinc-900 to-black border border-zinc-800 p-6 rounded-2xl shadow-xl group cursor-pointer mt-6"
-            onClick={() => navigate('/remote')}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-emerald-500/10 rounded-xl border border-emerald-500/20 group-hover:border-emerald-500/50 transition-colors">
-                <ExternalLink className="w-6 h-6 text-emerald-500" />
-              </div>
-              <div className="text-right">
-                <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">External Link</div>
-                <div className="text-xs font-bold text-emerald-500">LIVE TELEMETRY</div>
-              </div>
-            </div>
-            <h3 className="text-lg font-bold text-white mb-2">Remote Dashboard</h3>
-            <p className="text-xs text-zinc-500 leading-relaxed mb-4">
-              Access the standalone monitoring interface with real-time appliance controls and system health metrics.
-            </p>
-            <div className="flex items-center gap-2 text-[10px] font-mono text-emerald-500 uppercase tracking-widest">
-              <span>Open Interface</span>
-              <ArrowRightLeft className="w-3 h-3 rotate-45" />
-            </div>
-          </motion.div>
         </div>
       </main>
 
