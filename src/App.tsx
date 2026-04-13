@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from "react-router-dom";
-import { Battery, Thermometer, Zap, Activity, Save, Download, RefreshCcw, Settings2, X, Brain, AlertTriangle, CheckCircle2, Sun, Gauge, Power, ArrowRightLeft, ExternalLink } from "lucide-react";
+import { Battery, Thermometer, Zap, Activity, Save, Download, RefreshCcw, Settings2, X, Brain, AlertTriangle, CheckCircle2, Sun, Gauge, Power, ArrowRightLeft, ExternalLink, Volume2, VolumeX } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { GoogleGenAI, Type } from "@google/genai";
 
@@ -299,7 +299,7 @@ export default function App() {
   const calculateRuntime = () => {
     const totalLoadPower = smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
     
-    const solarChargingPower = solarVoltage > 0 ? (solarVoltage * 0.5) : 0; // Assume 0.5A charge current at solar voltage
+    const solarChargingPower = solarVoltage > 0 ? ((solarVoltage / 300) * 500) : 0;
     
     const netPower = totalLoadPower - solarChargingPower;
     
@@ -317,7 +317,7 @@ export default function App() {
   const getRuntimeProjectionData = () => {
     const totalLoadPower = smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
 
-    const solarChargingPower = solarVoltage > 0 ? (solarVoltage * 0.5) : 0;
+    const solarChargingPower = solarVoltage > 0 ? ((solarVoltage / 300) * 500) : 0;
     const netPower = totalLoadPower - solarChargingPower;
     
     const currentSoc = cells.reduce((acc, c) => acc + c.soc, 0) / cells.length;
@@ -408,9 +408,12 @@ export default function App() {
     const interval = setInterval(async () => {
       try {
         const res = await fetch("/api/appliances");
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        const contentType = res.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          throw new TypeError("Oops, we haven't got JSON!");
+        }
         const data = await res.json();
-        // Only update if different to avoid state loops if possible, 
-        // but simple overwrite is easier for sync
         setSmartHomeAppliances(data);
       } catch (e) {
         console.error("Failed to poll appliances:", e);
@@ -423,7 +426,29 @@ export default function App() {
   const [isAiMonitoring, setIsAiMonitoring] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
   const lastAiAnalysisTime = useRef<number>(0);
+  const prevStatusRef = useRef<'normal' | 'warning' | 'critical' | null>(null);
+
+  // Sound Alert Effect
+  useEffect(() => {
+    if (isAiMonitoring && aiAnalysis && !isMuted) {
+      if (aiAnalysis.status !== prevStatusRef.current) {
+        if (aiAnalysis.status === 'critical') {
+          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3');
+          audio.volume = 0.4;
+          audio.play().catch(() => {});
+        } else if (aiAnalysis.status === 'warning') {
+          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+          audio.volume = 0.3;
+          audio.play().catch(() => {});
+        }
+        prevStatusRef.current = aiAnalysis.status;
+      }
+    } else if (!isAiMonitoring || !aiAnalysis) {
+      prevStatusRef.current = null;
+    }
+  }, [aiAnalysis, isAiMonitoring, isMuted]);
 
   useEffect(() => {
     fetchCells();
@@ -440,21 +465,61 @@ export default function App() {
       const totalLoadCurrent = smartHomePower / (totalBatteryVoltage || 296);
       
       // Solar Charging Current (Simulated)
-      const solarChargeCurrent = solarVoltage > 0 ? (solarVoltage / 300) * 1.5 : 0; // Max 1.5A charge
+      const solarPower = solarVoltage > 0 ? ((solarVoltage / 300) * 500) : 0;
+      const solarChargeCurrent = solarPower / (totalBatteryVoltage || 370); // Max 500W charge
       
       // Advanced Switching Logic
       let nextPowerSource: 'battery' | 'solar' = 'battery';
 
-      if (solarVoltage >= 300) {
+      // EMERGENCY OVERRIDE: If AI detects anomaly, force solar and shutdown battery
+      const isEmergency = aiAnalysis?.status === 'critical' || aiAnalysis?.status === 'warning';
+      
+      if (isEmergency) {
         nextPowerSource = 'solar';
-      } else if (isBatteryLow && solarVoltage > 240) {
-        nextPowerSource = 'solar';
-      } else if (solarVoltage < 240) {
-        nextPowerSource = 'battery';
-      } else if (isBatteryFull) {
-        nextPowerSource = 'battery';
-      } else if (solarVoltage > totalBatteryVoltage + 5) {
-        nextPowerSource = 'solar';
+        
+        // Load Shedding: If solar is not enough, turn off non-essential appliances
+        const currentLoad = smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
+        if (solarPower < currentLoad) {
+          // Priority list for shutdown: AC -> Fans -> Lights
+          const priorityOrder = ['air_conditioner', 'fan', 'tv', 'washing_machine', 'light'];
+          let loadToShed = currentLoad - solarPower;
+          let updatedAppliances = [...smartHomeAppliances];
+          let changed = false;
+
+          for (const type of priorityOrder) {
+            for (let i = 0; i < updatedAppliances.length; i++) {
+              if (updatedAppliances[i].isOn && updatedAppliances[i].type === type) {
+                updatedAppliances[i] = { ...updatedAppliances[i], isOn: false };
+                loadToShed -= updatedAppliances[i].power;
+                changed = true;
+                if (loadToShed <= 0) break;
+              }
+            }
+            if (loadToShed <= 0) break;
+          }
+
+          if (changed) {
+            setSmartHomeAppliances(updatedAppliances);
+            // Sync to server
+            fetch("/api/appliances", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(updatedAppliances),
+            }).catch(e => console.error("Emergency sync failed:", e));
+          }
+        }
+      } else {
+        if (solarVoltage >= 300) {
+          nextPowerSource = 'solar';
+        } else if (isBatteryLow && solarVoltage > 240) {
+          nextPowerSource = 'solar';
+        } else if (solarVoltage < 240) {
+          nextPowerSource = 'battery';
+        } else if (isBatteryFull) {
+          nextPowerSource = 'battery';
+        } else if (solarVoltage > totalBatteryVoltage + 5) {
+          nextPowerSource = 'solar';
+        }
       }
 
       setPowerSource(nextPowerSource);
@@ -467,8 +532,8 @@ export default function App() {
           let newSoh = cell.soh;
 
           // Simultaneous Charge/Discharge Logic
-          const chargeRate = !isBatteryFull ? (solarChargeCurrent / 80) : 0;
-          const dischargeRate = (nextPowerSource === 'battery') ? (totalLoadCurrent / 80) : 0;
+          const chargeRate = !isBatteryFull ? (solarChargeCurrent / 100) : 0;
+          const dischargeRate = (nextPowerSource === 'battery') ? (totalLoadCurrent / 100) : 0;
           const netRate = chargeRate - dischargeRate;
 
           // Update SOC and Voltage based on net rate
@@ -599,7 +664,8 @@ export default function App() {
     if (isAiMonitoring) {
       interval = setInterval(async () => {
         const now = Date.now();
-        if (now - lastAiAnalysisTime.current > 10000 && !isAiAnalyzing) {
+        // Increased interval to 60 seconds to avoid rate limits
+        if (now - lastAiAnalysisTime.current > 60000 && !isAiAnalyzing) {
           runAiAnalysis();
         }
       }, 1000);
@@ -665,8 +731,24 @@ export default function App() {
       const result = JSON.parse(response.text) as AIAnalysis;
       setAiAnalysis(result);
       setAiCells(result.cells);
-    } catch (error) {
+    } catch (error: any) {
       console.error("AI Analysis failed:", error);
+      // Handle rate limiting (429) gracefully
+      if (error?.message?.includes('429') || error?.status === 429) {
+        setAiAnalysis({
+          cells: [],
+          alert: "AI Rate Limit Reached. Retrying in 1 minute...",
+          status: 'warning',
+          recommendation: "The system is currently experiencing high demand. Automated monitoring will resume shortly."
+        });
+      } else {
+        setAiAnalysis({
+          cells: [],
+          alert: "AI Monitoring Service Unavailable",
+          status: 'warning',
+          recommendation: "Please check your network connection or try again later."
+        });
+      }
     } finally {
       setIsAiAnalyzing(false);
     }
@@ -747,6 +829,8 @@ export default function App() {
           saving={saving}
           isAiMonitoring={isAiMonitoring}
           setIsAiMonitoring={setIsAiMonitoring}
+          isMuted={isMuted}
+          setIsMuted={setIsMuted}
           aiAnalysis={aiAnalysis}
           setAiAnalysis={setAiAnalysis}
           aiCells={aiCells}
@@ -793,6 +877,7 @@ export default function App() {
 
 const MainApp = ({ 
   cells, setCells, loading, saving, isAiMonitoring, setIsAiMonitoring, 
+  isMuted, setIsMuted,
   aiAnalysis, setAiAnalysis, aiCells, setAiCells, isAiAnalyzing, 
   activeView, setActiveView, powerSource, setPowerSource, 
   solarVoltage, setSolarVoltage, smartHomeAppliances, toggleAppliance, 
@@ -853,6 +938,13 @@ const MainApp = ({
           >
             <Brain className={`w-4 h-4 ${isAiMonitoring ? 'animate-pulse' : ''}`} />
             {isAiMonitoring ? 'AI MONITORING ON' : 'START AI MONITOR'}
+          </button>
+          <button
+            onClick={() => setIsMuted(!isMuted)}
+            className={`flex items-center justify-center w-10 h-10 rounded-lg transition-all border ${isMuted ? 'bg-red-500/10 border-red-500/50 text-red-500' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-700'}`}
+            title={isMuted ? "Unmute Alerts" : "Mute Alerts"}
+          >
+            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
           <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1 gap-2">
             <Activity className={`w-4 h-4 ${isLiveSync ? 'text-emerald-500 animate-pulse' : 'text-zinc-600'}`} />
@@ -1273,8 +1365,8 @@ const MainApp = ({
 
                   <div className="w-full max-w-3xl aspect-[16/8] bg-zinc-900/20 rounded-3xl border border-zinc-800/50 p-8 flex items-center justify-center">
                     <PowerSankey 
-                      solarPower={solarVoltage * 0.5}
-                      batteryPower={totalLoadPower - (solarVoltage * 0.5)}
+                      solarPower={(solarVoltage / 300) * 500}
+                      batteryPower={totalLoadPower - ((solarVoltage / 300) * 500)}
                       loadPower={totalLoadPower}
                       width={700}
                       height={300}
@@ -1284,12 +1376,12 @@ const MainApp = ({
                   <div className="grid grid-cols-3 gap-12 w-full max-w-2xl">
                     <div className="text-center">
                       <div className="text-[10px] font-mono text-zinc-600 uppercase mb-1">Generation</div>
-                      <div className="text-sm font-bold text-yellow-500">{(solarVoltage * 0.5).toFixed(1)}W</div>
+                      <div className="text-sm font-bold text-yellow-500">{((solarVoltage / 300) * 500).toFixed(1)}W</div>
                     </div>
                     <div className="text-center">
                       <div className="text-[10px] font-mono text-zinc-600 uppercase mb-1">Storage Delta</div>
-                      <div className={`text-sm font-bold ${(totalLoadPower - (solarVoltage * 0.5)) < 0 ? 'text-emerald-500' : 'text-red-400'}`}>
-                        {(totalLoadPower - (solarVoltage * 0.5)).toFixed(1)}W
+                      <div className={`text-sm font-bold ${(totalLoadPower - ((solarVoltage / 300) * 500)) < 0 ? 'text-emerald-500' : 'text-red-400'}`}>
+                        {(totalLoadPower - ((solarVoltage / 300) * 500)).toFixed(1)}W
                       </div>
                     </div>
                     <div className="text-center">

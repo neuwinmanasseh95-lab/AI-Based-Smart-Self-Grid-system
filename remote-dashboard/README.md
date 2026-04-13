@@ -1,39 +1,23 @@
-# Remote BMS Dashboard Implementation Guide
+# BMS Remote Dashboard
 
-This folder contains a standalone React application designed to monitor your Battery Management System (BMS) remotely.
+This is a standalone React application designed to be deployed to Vercel (or any static hosting) to remotely monitor and control your AI-Powered Smart Home BMS.
 
-## 1. How the Integration Works
-The integration uses a **Producer-Consumer** architecture:
-- **Producer (Main App)**: Every second, the main BMS app calculates its state and sends a `POST` request to `/api/telemetry`.
-- **Bridge (Server)**: The server saves this data into a `telemetry.json` file.
-- **Consumer (Remote Dashboard)**: This dashboard app sends a `GET` request to `/api/telemetry` every 2 seconds to display the latest data.
+## Features
+- **Real-time Energy Flow**: Dynamic Sankey chart showing solar, battery, and load distribution.
+- **Smart Home Control**: Toggle appliances remotely.
+- **AI Monitoring**: Receive critical alerts and recommendations from the main system.
+- **Live Sync**: Connects via the "Remote API URL" feature.
 
-## 2. Local Setup
-To run this dashboard locally:
-1. Open your terminal in this folder (`/remote-dashboard`).
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Start the development server:
-   ```bash
-   npm run dev
-   ```
+## How to Deploy to Vercel
+1. Download or copy this folder.
+2. Push it to a new GitHub repository.
+3. Connect the repository to Vercel.
+4. Once deployed, copy the Vercel URL.
+5. In your **Main BMS App**, paste the Vercel URL into the "Remote API URL" field and toggle **LIVE ON**.
+6. In this **Remote Dashboard**, paste the Main BMS App URL into the connection box and click **CONNECT**.
 
-## 3. Vercel Deployment Steps
-To host this dashboard on Vercel:
-1. **Push to GitHub**: Create a new repository on GitHub and push the contents of this `/remote-dashboard` folder to it.
-2. **Import to Vercel**:
-   - Log in to [Vercel](https://vercel.com).
-   - Click "Add New" -> "Project".
-   - Import your GitHub repository.
-3. **Configure Settings**:
-   - Vercel will automatically detect it as a **Vite** project.
-   - Click **Deploy**.
-4. **CORS Note**: The main BMS app is already configured to allow requests from any domain (CORS enabled), so your Vercel app will be able to fetch data immediately.
-
-## 4. API Configuration
-The API URL is currently hardcoded in `src/App.tsx`:
-`https://ais-dev-ud52njvxjdxjr24b3mxiyf-455245030455.asia-southeast1.run.app/api/telemetry`
-
-If you deploy your main BMS app to a different URL, simply update the `BMS_API_URL` constant in `src/App.tsx`.
+## Local Development
+```bash
+npm install
+npm run dev
+```

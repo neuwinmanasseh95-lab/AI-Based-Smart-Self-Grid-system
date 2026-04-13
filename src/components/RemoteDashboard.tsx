@@ -99,12 +99,12 @@ export const RemoteDashboard = ({ onBack }: { onBack: () => void }) => {
   const calculateRuntime = () => {
     if (!data) return "00:00";
     const totalLoadPower = appliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
-    const solarChargingPower = data.solarVoltage > 0 ? (data.solarVoltage * 0.5) : 0;
+    const solarChargingPower = data.solarVoltage > 0 ? ((data.solarVoltage / 300) * 500) : 0;
     const netPower = totalLoadPower - solarChargingPower;
     
     if (netPower <= 0) return "∞";
     
-    const totalEnergyWh = 80 * 5 * 3.7 * (data.soc / 100);
+    const totalEnergyWh = 100 * 5 * 3.7 * (data.soc / 100);
     const hoursRemaining = totalEnergyWh / netPower;
     
     const h = Math.floor(hoursRemaining);
@@ -116,12 +116,12 @@ export const RemoteDashboard = ({ onBack }: { onBack: () => void }) => {
     if (!data) return [];
     const points = [];
     const totalLoadPower = appliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
-    const netPower = totalLoadPower - (data.solarVoltage * 0.5);
-    const totalEnergyWh = 80 * 5 * 3.7 * (data.soc / 100);
+    const netPower = totalLoadPower - ((data.solarVoltage / 300) * 500);
+    const totalEnergyWh = 100 * 5 * 3.7 * (data.soc / 100);
     
     for (let i = 0; i <= 12; i++) {
       const projectedEnergy = Math.max(0, totalEnergyWh - (netPower * i));
-      const projectedSoc = (projectedEnergy / (80 * 5 * 3.7)) * 100;
+      const projectedSoc = (projectedEnergy / (100 * 5 * 3.7)) * 100;
       points.push({
         hour: `${i}h`,
         soc: Number(projectedSoc.toFixed(1))

@@ -79,7 +79,7 @@ app.post("/api/telemetry", (req, res) => {
 });
 
 app.get("/api/battery-pack", (req, res) => {
-  const defaultData = Array.from({ length: 80 }, (_, i) => ({
+  const defaultData = Array.from({ length: 100 }, (_, i) => ({
     id: i,
     name: `Cell ${i + 1}`,
     voltage: 3.7,

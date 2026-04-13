@@ -1,29 +1,27 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
+  Zap, 
   Sun, 
   Battery, 
-  Zap, 
-  Clock, 
-  ShieldAlert, 
-  TrendingDown,
-  Activity,
-  Thermometer
+  Activity, 
+  Brain, 
+  AlertTriangle, 
+  CheckCircle2, 
+  Power, 
+  Settings, 
+  Wifi, 
+  WifiOff,
+  Lightbulb,
+  Tv,
+  Wind,
+  Refrigerator,
+  Fan,
+  WashingMachine
 } from 'lucide-react';
-import { 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer 
-} from 'recharts';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
+import { PowerSankey } from './components/PowerSankey';
 
-// CONFIG: The URL of your main BMS application
-const BMS_API_URL = "https://ais-dev-ud52njvxjdxjr24b3mxiyf-455245030455.asia-southeast1.run.app/api/telemetry";
-
-interface TelemetryData {
+interface Telemetry {
   solarVoltage: number;
   packVoltage: number;
   loadPowerWatts: number;
@@ -38,263 +36,307 @@ interface TelemetryData {
   };
 }
 
+interface Appliance {
+  id: string;
+  name: string;
+  type: string;
+  power: number;
+  isOn: boolean;
+  x: number;
+  y: number;
+}
+
+interface AIAnalysis {
+  alert: string;
+  status: 'normal' | 'warning' | 'critical';
+  recommendation: string;
+}
+
 export default function App() {
-  const [data, setData] = useState<TelemetryData | null>(null);
-  const [currentTime, setCurrentTime] = useState(new Date());
-  const [isOnline, setIsOnline] = useState(false);
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [isConnected, setIsConnected] = useState(false);
+  const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
+  const [appliances, setAppliances] = useState<Appliance[]>([]);
+  const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
-  // 1. REAL-TIME CLOCK
+  // Polling logic
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+    if (!isConnected || !sourceUrl) return;
 
-  // 2. API INTEGRATION (Fetching from the BMS App)
-  useEffect(() => {
-    const fetchData = async () => {
+    const interval = setInterval(async () => {
       try {
-        const response = await fetch(BMS_API_URL);
-        if (!response.ok) throw new Error('API Offline');
-        const result = await response.json();
-        setData(result);
-        setIsOnline(true);
-      } catch (err) {
-        console.error("Connection failed:", err);
-        setIsOnline(false);
+        const baseUrl = sourceUrl.endsWith('/') ? sourceUrl.slice(0, -1) : sourceUrl;
+        
+        // Fetch Telemetry
+        const telRes = await fetch(`${baseUrl}/api/telemetry`);
+        const telData = await telRes.json();
+        setTelemetry(telData);
+
+        // Fetch Appliances
+        const appRes = await fetch(`${baseUrl}/api/appliances`);
+        const appData = await appRes.json();
+        setAppliances(appData);
+
+        // Fetch AI Analysis (Mocked or from telemetry if available)
+        // In this setup, we'll assume the source app pushes AI alerts to telemetry or a specific endpoint
+        // For simplicity, we'll check if telemetry has anomaly details
+        if (telData.anomalyDetected) {
+          setAiAnalysis({
+            alert: telData.anomalyDetails.message,
+            status: 'critical',
+            recommendation: "Check physical connections immediately."
+          });
+        }
+
+        setLastUpdate(new Date());
+      } catch (e) {
+        console.error("Sync failed:", e);
+        setIsConnected(false);
       }
-    };
+    }, 2000);
 
-    fetchData();
-    const interval = setInterval(fetchData, 2000); // Poll every 2 seconds
     return () => clearInterval(interval);
-  }, []);
+  }, [isConnected, sourceUrl]);
 
-  // 3. GRAPHICAL ESTIMATED TIME (Projection)
-  const projectionData = useMemo(() => {
-    if (!data) return [];
-    const points = [];
-    const netPower = data.loadPowerWatts - (data.solarVoltage * 0.5);
-    const totalEnergyWh = 80 * 5 * 3.7 * (data.soc / 100); 
+  const toggleAppliance = async (id: string) => {
+    if (!sourceUrl) return;
+    const baseUrl = sourceUrl.endsWith('/') ? sourceUrl.slice(0, -1) : sourceUrl;
     
-    for (let i = 0; i <= 12; i++) {
-      const projectedEnergy = Math.max(0, totalEnergyWh - (netPower * i));
-      const projectedSoc = (projectedEnergy / (80 * 5 * 3.7)) * 100;
-      points.push({
-        hour: `${i}h`,
-        soc: Number(projectedSoc.toFixed(1))
+    const updated = appliances.map(app => 
+      app.id === id ? { ...app, isOn: !app.isOn } : app
+    );
+    setAppliances(updated);
+
+    try {
+      await fetch(`${baseUrl}/api/appliances`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
       });
-      if (projectedSoc <= 0) break;
+    } catch (e) {
+      console.error("Failed to toggle appliance:", e);
     }
-    return points;
-  }, [data]);
+  };
+
+  const getIcon = (type: string) => {
+    switch (type) {
+      case 'light': return <Lightbulb className="w-5 h-5" />;
+      case 'tv': return <Tv className="w-5 h-5" />;
+      case 'air_conditioner': return <Wind className="w-5 h-5" />;
+      case 'refrigerator': return <Refrigerator className="w-5 h-5" />;
+      case 'fan': return <Fan className="w-5 h-5" />;
+      case 'washing_machine': return <WashingMachine className="w-5 h-5" />;
+      default: return <Zap className="w-5 h-5" />;
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white p-6 md:p-12 font-sans">
-      <div className="max-w-7xl mx-auto space-y-8">
-        
-        {/* TOP BAR: Title & Clock */}
-        <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-zinc-800 pb-8">
+    <div className="min-h-screen bg-[#050505] text-zinc-100 p-4 md:p-8 font-sans">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
           <div>
-            <h1 className="text-4xl font-black tracking-tighter flex items-center gap-4">
-              <Activity className="text-emerald-500 w-10 h-10" />
-              REMOTE BMS HUB
-            </h1>
-            <p className="text-zinc-500 font-mono text-xs uppercase tracking-[0.3em] mt-2">
-              Satellite Link Status: <span className={isOnline ? "text-emerald-500" : "text-red-500"}>
-                {isOnline ? "ENCRYPTED & ONLINE" : "LINK INTERRUPTED"}
-              </span>
-            </p>
-          </div>
-          
-          <div className="flex items-center gap-8 bg-zinc-900/40 border border-zinc-800 px-8 py-4 rounded-3xl">
-            <div className="flex flex-col items-end">
-              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">System Time</span>
-              <span className="text-3xl font-mono font-bold">
-                {currentTime.toLocaleTimeString([], { hour12: false })}
-              </span>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[10px] font-mono uppercase tracking-[0.3em] text-zinc-500">Remote Command Center</span>
             </div>
-            <Clock className="w-8 h-8 text-zinc-600" />
+            <h1 className="text-4xl font-bold tracking-tighter">
+              BMS <span className="text-emerald-500">REMOTE</span> DASHBOARD
+            </h1>
+          </div>
+
+          <div className="flex items-center gap-3 bg-zinc-900/50 border border-zinc-800 p-2 rounded-xl backdrop-blur-sm">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-black/40 rounded-lg border border-zinc-800">
+              {isConnected ? <Wifi className="w-4 h-4 text-emerald-500" /> : <WifiOff className="w-4 h-4 text-zinc-600" />}
+              <input 
+                type="text" 
+                placeholder="Enter Source URL..." 
+                value={sourceUrl}
+                onChange={(e) => setSourceUrl(e.target.value)}
+                className="bg-transparent border-none outline-none text-xs font-mono w-48 text-zinc-300"
+              />
+            </div>
+            <button 
+              onClick={() => setIsConnected(!isConnected)}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                isConnected 
+                ? 'bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20' 
+                : 'bg-emerald-500 text-black hover:bg-emerald-400'
+              }`}
+            >
+              {isConnected ? 'DISCONNECT' : 'CONNECT'}
+            </button>
           </div>
         </header>
 
-        {/* AI CRITICAL ALERT SECTION */}
-        <AnimatePresence>
-          {data?.anomalyDetected && (
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-red-600/10 border-2 border-red-600 p-8 rounded-[2.5rem] flex items-center gap-8 shadow-[0_0_50px_rgba(220,38,38,0.2)]"
-            >
-              <div className="p-5 bg-red-600 rounded-2xl animate-pulse">
-                <ShieldAlert className="w-10 h-10 text-white" />
-              </div>
-              <div className="flex-1">
-                <h2 className="text-2xl font-black text-white uppercase tracking-tight">AI CRITICAL ANOMALY DETECTED</h2>
-                <p className="text-red-400 font-mono text-sm mt-1">
-                  {data.anomalyDetails.message}
-                </p>
-                <div className="mt-3 inline-block bg-red-600 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase">
-                  Location: {data.anomalyDetails.location}
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* MAIN METRICS GRID */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          
-          {/* SOLAR VOLTAGE */}
-          <div className="bg-zinc-900/30 border border-zinc-800 p-10 rounded-[2.5rem] space-y-6 relative overflow-hidden group">
-            <div className="absolute top-0 left-0 w-1.5 h-full bg-yellow-500" />
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono text-zinc-500 uppercase tracking-widest">Solar Input</span>
-              <Sun className="w-6 h-6 text-yellow-500 group-hover:rotate-90 transition-transform duration-500" />
+        {!isConnected ? (
+          <div className="h-[60vh] flex flex-col items-center justify-center text-center border border-dashed border-zinc-800 rounded-3xl bg-zinc-900/10">
+            <div className="w-16 h-16 bg-zinc-900 rounded-2xl flex items-center justify-center mb-6 border border-zinc-800">
+              <Settings className="w-8 h-8 text-zinc-700 animate-spin-slow" />
             </div>
-            <div className="flex items-baseline gap-3">
-              <span className="text-7xl font-black">{data?.solarVoltage.toFixed(1)}</span>
-              <span className="text-2xl font-medium text-zinc-600">V</span>
-            </div>
+            <h2 className="text-xl font-medium text-zinc-400 mb-2">System Offline</h2>
+            <p className="text-zinc-600 text-sm max-w-xs">
+              Enter the API URL of your main BMS application to begin real-time telemetry synchronization.
+            </p>
           </div>
-
-          {/* BATTERY PACK VOLTAGE */}
-          <div className="bg-zinc-900/30 border border-zinc-800 p-10 rounded-[2.5rem] space-y-6 relative overflow-hidden group">
-            <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500" />
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono text-zinc-500 uppercase tracking-widest">Pack Voltage</span>
-              <Battery className="w-6 h-6 text-emerald-500" />
-            </div>
-            <div className="flex items-baseline gap-3">
-              <span className="text-7xl font-black">{data?.packVoltage.toFixed(1)}</span>
-              <span className="text-2xl font-medium text-zinc-600">V</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
-                <motion.div 
-                  className="h-full bg-emerald-500"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${data?.soc}%` }}
-                />
-              </div>
-              <span className="text-xs font-mono font-bold text-emerald-500">{data?.soc}% SOC</span>
-            </div>
-          </div>
-
-          {/* LOAD POWER PERCENTAGE */}
-          <div className="bg-zinc-900/30 border border-zinc-800 p-10 rounded-[2.5rem] space-y-6 relative overflow-hidden group">
-            <div className="absolute top-0 left-0 w-1.5 h-full bg-orange-500" />
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono text-zinc-500 uppercase tracking-widest">Load Power</span>
-              <Zap className="w-6 h-6 text-orange-500" />
-            </div>
-            <div className="flex items-baseline gap-3">
-              <span className="text-7xl font-black">{Math.round(data?.loadPowerPercent || 0)}</span>
-              <span className="text-2xl font-medium text-zinc-600">%</span>
-            </div>
-            <div className="text-xs font-mono text-zinc-500 uppercase">
-              Actual: {data?.loadPowerWatts.toFixed(0)}W
-            </div>
-          </div>
-        </div>
-
-        {/* BOTTOM SECTION: GRAPH & THERMALS */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          
-          {/* GRAPHICAL ESTIMATED TIME */}
-          <div className="lg:col-span-3 bg-zinc-900/30 border border-zinc-800 p-10 rounded-[2.5rem] space-y-8">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <TrendingDown className="text-emerald-500" />
-                <h3 className="text-sm font-mono uppercase tracking-widest text-zinc-400">Estimated Capacity Projection</h3>
-              </div>
-              <div className="text-[10px] font-mono text-zinc-600 uppercase border border-zinc-800 px-3 py-1 rounded-full">
-                12H Simulation Window
-              </div>
-            </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             
-            <div className="h-[350px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={projectionData}>
-                  <defs>
-                    <linearGradient id="colorSoc" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.4}/>
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
-                  <XAxis 
-                    dataKey="hour" 
-                    stroke="#52525b" 
-                    fontSize={12} 
-                    tickLine={false}
-                    axisLine={false}
-                    dy={10}
-                  />
-                  <YAxis 
-                    domain={[0, 100]} 
-                    stroke="#52525b" 
-                    fontSize={12} 
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(val) => `${val}%`}
-                  />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #27272a', borderRadius: '16px', fontSize: '12px' }}
-                    itemStyle={{ color: '#10b981' }}
-                  />
-                  <Area 
-                    type="monotone" 
-                    dataKey="soc" 
-                    stroke="#10b981" 
-                    strokeWidth={4}
-                    fillOpacity={1} 
-                    fill="url(#colorSoc)" 
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* SECONDARY TELEMETRY */}
-          <div className="space-y-8">
-            <div className="bg-zinc-900/30 border border-zinc-800 p-8 rounded-[2.5rem] space-y-8">
-              <h3 className="text-xs font-mono uppercase tracking-widest text-zinc-500">Live Diagnostics</h3>
-              
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
+            {/* Left Column: Energy Flow & AI */}
+            <div className="lg:col-span-7 space-y-6">
+              {/* Sankey Card */}
+              <div className="bg-zinc-900/30 border border-zinc-800 rounded-3xl p-6 backdrop-blur-md">
+                <div className="flex items-center justify-between mb-8">
                   <div className="flex items-center gap-3">
-                    <Thermometer className="w-4 h-4 text-zinc-500" />
-                    <span className="text-xs text-zinc-400">Core Temp</span>
+                    <div className="p-2 bg-orange-500/10 rounded-lg">
+                      <Zap className="w-5 h-5 text-orange-500" />
+                    </div>
+                    <h3 className="text-sm font-bold uppercase tracking-widest text-zinc-400">Energy Distribution</h3>
                   </div>
-                  <span className="text-xl font-bold">{data?.temp.toFixed(1)}°C</span>
+                  <div className="text-[10px] font-mono text-zinc-600">
+                    LIVE SYNC: {lastUpdate?.toLocaleTimeString()}
+                  </div>
                 </div>
                 
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Zap className="w-4 h-4 text-zinc-500" />
-                    <span className="text-xs text-zinc-400">Net Current</span>
+                <div className="h-[300px] w-full">
+                  <PowerSankey 
+                    solarPower={telemetry ? (telemetry.solarVoltage / 300) * 500 : 0}
+                    batteryPower={telemetry ? (telemetry.current * telemetry.packVoltage) : 0}
+                    loadPower={telemetry?.loadPowerWatts || 0}
+                    width={500}
+                    height={250}
+                  />
+                </div>
+              </div>
+
+              {/* AI Alerts */}
+              <AnimatePresence>
+                {aiAnalysis && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className={`p-6 rounded-3xl border ${
+                      aiAnalysis.status === 'critical' 
+                      ? 'bg-red-500/10 border-red-500/30' 
+                      : 'bg-yellow-500/10 border-yellow-500/30'
+                    }`}
+                  >
+                    <div className="flex items-start gap-4">
+                      <div className={`p-3 rounded-2xl ${
+                        aiAnalysis.status === 'critical' ? 'bg-red-500/20' : 'bg-yellow-500/20'
+                      }`}>
+                        <AlertTriangle className={`w-6 h-6 ${
+                          aiAnalysis.status === 'critical' ? 'text-red-500' : 'text-yellow-500'
+                        }`} />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <h4 className={`text-sm font-bold uppercase tracking-tighter ${
+                            aiAnalysis.status === 'critical' ? 'text-red-400' : 'text-yellow-400'
+                          }`}>
+                            AI System Alert: {aiAnalysis.status.toUpperCase()}
+                          </h4>
+                          <Brain className="w-4 h-4 text-purple-500 animate-pulse" />
+                        </div>
+                        <p className="text-zinc-200 text-lg font-medium mb-3 leading-tight">
+                          {aiAnalysis.alert}
+                        </p>
+                        <div className="flex items-center gap-2 text-xs text-zinc-500 bg-black/20 p-3 rounded-xl border border-white/5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                          <span className="font-mono uppercase tracking-wider">Recommendation:</span>
+                          <span className="text-zinc-300">{aiAnalysis.recommendation}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Right Column: Smart Home Controls */}
+            <div className="lg:col-span-5 space-y-6">
+              <div className="bg-zinc-900/30 border border-zinc-800 rounded-3xl p-6 backdrop-blur-md h-full">
+                <div className="flex items-center gap-3 mb-8">
+                  <div className="p-2 bg-emerald-500/10 rounded-lg">
+                    <Power className="w-5 h-5 text-emerald-500" />
                   </div>
-                  <span className="text-xl font-bold">{data?.current.toFixed(2)}A</span>
+                  <h3 className="text-sm font-bold uppercase tracking-widest text-zinc-400">Smart Home Control</h3>
                 </div>
 
-                <div className="pt-4 border-t border-zinc-800">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-mono text-zinc-500 uppercase">Health Index</span>
-                    <span className="text-xs font-bold text-emerald-500">OPTIMAL</span>
+                <div className="grid grid-cols-1 gap-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+                  {appliances.map((app) => (
+                    <button
+                      key={app.id}
+                      onClick={() => toggleAppliance(app.id)}
+                      className={`group flex items-center justify-between p-4 rounded-2xl border transition-all duration-300 ${
+                        app.isOn 
+                        ? 'bg-emerald-500/10 border-emerald-500/30 shadow-[0_0_20px_rgba(16,185,129,0.05)]' 
+                        : 'bg-zinc-900/50 border-zinc-800 hover:border-zinc-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className={`p-3 rounded-xl transition-colors ${
+                          app.isOn ? 'bg-emerald-500 text-black' : 'bg-zinc-800 text-zinc-500'
+                        }`}>
+                          {getIcon(app.type)}
+                        </div>
+                        <div className="text-left">
+                          <div className={`text-sm font-bold tracking-tight transition-colors ${
+                            app.isOn ? 'text-white' : 'text-zinc-500'
+                          }`}>
+                            {app.name.toUpperCase()}
+                          </div>
+                          <div className="text-[10px] font-mono text-zinc-600">
+                            CONSUMPTION: {app.power}W
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all ${
+                        app.isOn 
+                        ? 'bg-emerald-500 border-emerald-400 text-black shadow-[0_0_15px_rgba(16,185,129,0.4)]' 
+                        : 'bg-zinc-800 border-zinc-700 text-zinc-600'
+                      }`}>
+                        <Power className="w-4 h-4" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-8 pt-6 border-t border-zinc-800/50">
+                  <div className="flex justify-between items-end">
+                    <div>
+                      <div className="text-[10px] font-mono text-zinc-600 uppercase tracking-widest mb-1">Total Load</div>
+                      <div className="text-3xl font-bold tracking-tighter text-white">
+                        {appliances.reduce((acc, a) => acc + (a.isOn ? a.power : 0), 0)}<span className="text-emerald-500 ml-1">W</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[10px] font-mono text-zinc-600 uppercase tracking-widest mb-1">Active Devices</div>
+                      <div className="text-xl font-bold text-zinc-300">
+                        {appliances.filter(a => a.isOn).length} / {appliances.length}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="p-8 bg-emerald-500/5 border border-emerald-500/10 rounded-[2.5rem]">
-              <p className="text-[10px] text-zinc-500 font-mono leading-relaxed uppercase tracking-wider">
-                System is operating within nominal safety parameters. Satellite link is stable.
-              </p>
-            </div>
           </div>
-        </div>
+        )}
       </div>
+
+      <style>{`
+        @keyframes spin-slow {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .animate-spin-slow {
+          animation: spin-slow 8s linear infinite;
+        }
+      `}</style>
     </div>
   );
 }

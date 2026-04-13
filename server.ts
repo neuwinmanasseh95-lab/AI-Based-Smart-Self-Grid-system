@@ -7,9 +7,9 @@ import cors from "cors";
 async function startServer() {
   const app = express();
   const PORT = 3000;
-  const DATA_FILE = path.join(process.cwd(), "battery-data.json");
-  const TELEMETRY_FILE = path.join(process.cwd(), "telemetry.json");
-  const APPLIANCES_FILE = path.join(process.cwd(), "appliances.json");
+  const DATA_FILE = path.join("/tmp", "battery-data.json");
+  const TELEMETRY_FILE = path.join("/tmp", "telemetry.json");
+  const APPLIANCES_FILE = path.join("/tmp", "appliances.json");
 
   app.use(cors());
   app.use(express.json());
@@ -17,8 +17,12 @@ async function startServer() {
   // API Routes
   app.get("/api/appliances", (req, res) => {
     if (fs.existsSync(APPLIANCES_FILE)) {
-      const data = fs.readFileSync(APPLIANCES_FILE, "utf-8");
-      res.json(JSON.parse(data));
+      try {
+        const data = fs.readFileSync(APPLIANCES_FILE, "utf-8");
+        res.json(JSON.parse(data));
+      } catch (e) {
+        res.status(500).json({ error: "Failed to parse data" });
+      }
     } else {
       const defaultAppliances = [
         { id: 'l1', name: 'Living Room Light', type: 'light', power: 40, isOn: false, x: 25, y: 25 },
@@ -48,8 +52,12 @@ async function startServer() {
 
   app.get("/api/telemetry", (req, res) => {
     if (fs.existsSync(TELEMETRY_FILE)) {
-      const data = fs.readFileSync(TELEMETRY_FILE, "utf-8");
-      res.json(JSON.parse(data));
+      try {
+        const data = fs.readFileSync(TELEMETRY_FILE, "utf-8");
+        res.json(JSON.parse(data));
+      } catch (e) {
+        res.status(500).json({ error: "Failed to parse telemetry data" });
+      }
     } else {
       res.json({
         solarVoltage: 0,
@@ -80,8 +88,12 @@ async function startServer() {
 
   app.get("/api/battery-pack", (req, res) => {
     if (fs.existsSync(DATA_FILE)) {
-      const data = fs.readFileSync(DATA_FILE, "utf-8");
-      res.json(JSON.parse(data));
+      try {
+        const data = fs.readFileSync(DATA_FILE, "utf-8");
+        res.json(JSON.parse(data));
+      } catch (e) {
+        res.status(500).json({ error: "Failed to parse battery data" });
+      }
     } else {
       // Return default 10x10 grid if no data exists
       const defaultData = Array.from({ length: 100 }, (_, i) => ({
@@ -105,6 +117,11 @@ async function startServer() {
     } catch (error) {
       res.status(500).json({ status: "error", message: "Failed to save data" });
     }
+  });
+
+  // Catch-all for API routes to return 404 JSON instead of HTML
+  app.all("/api/*", (req, res) => {
+    res.status(404).json({ error: "API route not found" });
   });
 
   // Vite middleware for development
