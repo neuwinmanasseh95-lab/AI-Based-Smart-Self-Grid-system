@@ -38,18 +38,21 @@ const Battery3D = ({
   isSelected, 
   onSelect,
   isCharging,
-  isAiMonitoring
+  isAiMonitoring,
+  isAnomaly
 }: { 
   cell: BatteryCell; 
   isSelected: boolean; 
   onSelect: (cell: BatteryCell) => void;
   isCharging: boolean;
   isAiMonitoring: boolean;
+  isAnomaly?: boolean;
 }) => {
   const meshRef = useRef<THREE.Mesh>(null);
   const glowRef = useRef<THREE.Mesh>(null);
   const pulseRef = useRef<THREE.Mesh>(null);
   const aiGlowRef = useRef<THREE.Mesh>(null);
+  const anomalyGlowRef = useRef<THREE.Mesh>(null);
   
   // Lifting animation logic: ONLY on selection as requested
   const targetY = isSelected ? 1.5 : 0;
@@ -61,14 +64,19 @@ const Battery3D = ({
     if (glowRef.current && isCharging) {
       const scale = 1 + Math.sin(state.clock.elapsedTime * 4) * 0.05;
       glowRef.current.scale.set(scale, scale, scale);
-      glowRef.current.position.y = meshRef.current?.position.y || 0;
     }
     if (aiGlowRef.current && isAiMonitoring) {
       const opacity = 0.1 + Math.sin(state.clock.elapsedTime * 2) * 0.1;
       if (aiGlowRef.current.material instanceof THREE.MeshStandardMaterial) {
         aiGlowRef.current.material.opacity = opacity;
       }
-      aiGlowRef.current.position.y = meshRef.current?.position.y || 0;
+    }
+    if (anomalyGlowRef.current && isAnomaly) {
+      const scale = 1.1 + Math.sin(state.clock.elapsedTime * 8) * 0.1;
+      anomalyGlowRef.current.scale.set(scale, scale, scale);
+      if (anomalyGlowRef.current.material instanceof THREE.MeshStandardMaterial) {
+        anomalyGlowRef.current.material.opacity = 0.3 + Math.sin(state.clock.elapsedTime * 8) * 0.2;
+      }
     }
     if (pulseRef.current && isSelected) {
       const s = 1 + Math.sin(state.clock.elapsedTime * 6) * 0.2;
@@ -106,6 +114,20 @@ const Battery3D = ({
           roughness={0.3}
         />
 
+        {/* Anomaly Pulse Glow */}
+        {isAnomaly && (
+          <mesh ref={anomalyGlowRef}>
+            <cylinderGeometry args={[0.22, 0.22, 1.02, 32]} />
+            <meshStandardMaterial 
+              color="#ef4444" 
+              transparent 
+              opacity={0.4}
+              emissive="#ef4444"
+              emissiveIntensity={1}
+            />
+          </mesh>
+        )}
+
         {/* Charging Glow */}
         {isCharging && (
           <mesh ref={glowRef}>
@@ -135,43 +157,118 @@ const Battery3D = ({
         )}
         
         {/* Parameter HUD - Only on selection */}
-        <Html distanceFactor={8} position={[0, 1.2, 0]} center>
+        <Html distanceFactor={8} position={[0, 0, 0]} center>
           <AnimatePresence>
             {isSelected && (
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.9, y: 10 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: 10 }}
-                transition={{ duration: 0.2, ease: "easeOut" }}
-                className="bg-zinc-950/95 border border-blue-500/40 p-3 rounded-xl shadow-2xl backdrop-blur-md pointer-events-none min-w-[100px]"
-              >
-                <div className="text-blue-400 text-[10px] font-black mb-2 tracking-tight">{cell.name}</div>
-                <div className="h-px bg-zinc-800 mb-2 w-full" />
-                <div className="flex flex-col gap-1.5 font-mono text-[9px]">
-                  <div className="flex justify-between gap-4">
-                    <span className="text-zinc-500">VOLT:</span>
-                    <span className="text-white font-bold">{cell.voltage.toFixed(2)}V</span>
+              <div className="relative w-[500px] h-[500px] pointer-events-none flex items-center justify-center">
+                {/* SOC Callout - Pointing to Top */}
+                <motion.div 
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="absolute left-[55%] top-[5%] flex items-center gap-4"
+                >
+                  <div className="relative flex items-center">
+                    <svg width="120" height="60" className="absolute -left-[120px] -top-[40px] overflow-visible">
+                      <motion.path
+                        d="M 120 50 L 80 50 L 40 10"
+                        fill="none"
+                        stroke="#10b981"
+                        strokeWidth="1.5"
+                        initial={{ pathLength: 0 }}
+                        animate={{ pathLength: 1 }}
+                      />
+                    </svg>
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_10px_#10b981]" />
                   </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-zinc-500">CURR:</span>
-                    <span className="text-white font-bold">{cell.current.toFixed(1)}A</span>
+                  <div className="text-left">
+                    <div className="text-[10px] font-black text-white uppercase tracking-tighter">SOC</div>
+                    <div className="text-xl font-black text-emerald-400 leading-none">{cell.soc}%</div>
                   </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-zinc-500">TEMP:</span>
-                    <span className={`${cell.temperature > 50 ? 'text-red-400' : 'text-white'} font-bold`}>
-                      {cell.temperature.toFixed(2)}°C
-                    </span>
+                </motion.div>
+
+                {/* SOH Callout - Pointing to Top */}
+                <motion.div 
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.1 }}
+                  className="absolute left-[55%] top-[20%] flex items-center gap-4"
+                >
+                  <div className="relative flex items-center">
+                    <svg width="100" height="40" className="absolute -left-[100px] -top-[20px] overflow-visible">
+                      <motion.path
+                        d="M 100 30 L 70 30 L 40 10"
+                        fill="none"
+                        stroke="#3b82f6"
+                        strokeWidth="1.5"
+                        initial={{ pathLength: 0 }}
+                        animate={{ pathLength: 1 }}
+                      />
+                    </svg>
+                    <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_10px_#3b82f6]" />
                   </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-zinc-500">SOC:</span>
-                    <span className="text-white font-bold">{cell.soc}%</span>
+                  <div className="text-left">
+                    <div className="text-[10px] font-black text-white uppercase tracking-tighter">SOH</div>
+                    <div className="text-xl font-black text-blue-400 leading-none">{cell.soh}%</div>
                   </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-zinc-500">SOH:</span>
-                    <span className="text-white font-bold">{cell.soh}%</span>
+                </motion.div>
+
+                {/* Voltage Callout - Pointing to Upper Side */}
+                <motion.div 
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="absolute left-[55%] top-[40%] flex items-center gap-4"
+                >
+                  <div className="relative flex items-center">
+                    <svg width="80" height="2" className="absolute -left-[80px] top-1/2 -translate-y-1/2">
+                      <line x1="0" y1="1" x2="80" y2="1" stroke="#3b82f6" strokeWidth="1.5" />
+                    </svg>
+                    <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_10px_#3b82f6]" />
                   </div>
-                </div>
-              </motion.div>
+                  <div className="text-left">
+                    <div className="text-[10px] font-black text-white uppercase tracking-tighter">VOLT</div>
+                    <div className="text-xl font-black text-blue-400 leading-none">{cell.voltage.toFixed(2)}V</div>
+                  </div>
+                </motion.div>
+
+                {/* Current Callout - Pointing to Middle Side */}
+                <motion.div 
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="absolute left-[55%] top-[60%] flex items-center gap-4"
+                >
+                  <div className="relative flex items-center">
+                    <svg width="80" height="2" className="absolute -left-[80px] top-1/2 -translate-y-1/2">
+                      <line x1="0" y1="1" x2="80" y2="1" stroke="#3b82f6" strokeWidth="1.5" />
+                    </svg>
+                    <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_10px_#3b82f6]" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-[10px] font-black text-white uppercase tracking-tighter">CURRENT</div>
+                    <div className="text-xl font-black text-blue-400 leading-none">{cell.current.toFixed(1)}A</div>
+                  </div>
+                </motion.div>
+
+                {/* Temperature Callout - Pointing to Lower Side */}
+                <motion.div 
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.4 }}
+                  className="absolute left-[55%] top-[80%] flex items-center gap-4"
+                >
+                  <div className="relative flex items-center">
+                    <svg width="80" height="2" className="absolute -left-[80px] top-1/2 -translate-y-1/2">
+                      <line x1="0" y1="1" x2="80" y2="1" stroke={cell.temperature > 50 ? "#ef4444" : "#3b82f6"} strokeWidth="1.5" />
+                    </svg>
+                    <div className={`w-2 h-2 rounded-full ${cell.temperature > 50 ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : 'bg-blue-500 shadow-[0_0_10px_#3b82f6]'}`} />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-[10px] font-black text-white uppercase tracking-tighter">TEMP</div>
+                    <div className={`text-xl font-black leading-none ${cell.temperature > 50 ? 'text-red-400' : 'text-blue-400'}`}>{cell.temperature.toFixed(1)}°C</div>
+                  </div>
+                </motion.div>
+              </div>
             )}
           </AnimatePresence>
         </Html>
@@ -214,13 +311,17 @@ const BatteryStack3D = ({
   selectedCell, 
   onSelect,
   timeOfDay,
-  isAiMonitoring
+  isAiMonitoring,
+  aiCells = [],
+  aiAnalysis = null
 }: { 
   cells: BatteryCell[]; 
   selectedCell: BatteryCell | null; 
   onSelect: (cell: BatteryCell) => void;
   timeOfDay: string;
   isAiMonitoring: boolean;
+  aiCells?: BatteryCell[];
+  aiAnalysis?: AIAnalysis | null;
 }) => {
   const envPreset = timeOfDay === 'night' ? 'night' : timeOfDay === 'noon' ? 'city' : 'sunset';
   
@@ -261,6 +362,7 @@ const BatteryStack3D = ({
               onSelect={onSelect}
               isCharging={timeOfDay !== 'night'}
               isAiMonitoring={isAiMonitoring}
+              isAnomaly={aiCells.some(c => c.id === cell.id) && aiAnalysis?.status !== 'normal'}
             />
           ))}
           
@@ -290,7 +392,7 @@ export default function App() {
   const [show3D, setShow3D] = useState(false);
   const [timeOfDay, setTimeOfDay] = useState<'dawn' | 'noon' | 'evening' | 'night'>('noon');
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [activeView, setActiveView] = useState<'grid' | 'distribution' | 'smarthome'>('grid');
+  const [activeView, setActiveView] = useState<'grid' | 'distribution' | 'smarthome' | 'schematic'>('grid');
   const [globalTargetTemp, setGlobalTargetTemp] = useState(25);
   const [capacityHistory, setCapacityHistory] = useState<{ time: string; soc: number }[]>([]);
   const [showRuntimeGraph, setShowRuntimeGraph] = useState(false);
@@ -429,9 +531,30 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(false);
   const lastAiAnalysisTime = useRef<number>(0);
   const prevStatusRef = useRef<'normal' | 'warning' | 'critical' | null>(null);
+  const continuousAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Sound Alert Effect
   useEffect(() => {
+    // Handle Continuous Anomaly Beep
+    const hasAnomaly = aiAnalysis && (aiAnalysis.status === 'critical' || aiAnalysis.status === 'warning');
+    
+    if (isAiMonitoring && hasAnomaly && !isMuted) {
+      if (!continuousAudioRef.current) {
+        // Using a long, clean beep sound
+        continuousAudioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/1001/1001-preview.mp3');
+        continuousAudioRef.current.loop = true;
+        continuousAudioRef.current.volume = 0.2;
+        continuousAudioRef.current.play().catch(() => {});
+      }
+    } else {
+      if (continuousAudioRef.current) {
+        continuousAudioRef.current.pause();
+        continuousAudioRef.current.currentTime = 0;
+        continuousAudioRef.current = null;
+      }
+    }
+
+    // Handle Status Change One-shot Alerts
     if (isAiMonitoring && aiAnalysis && !isMuted) {
       if (aiAnalysis.status !== prevStatusRef.current) {
         if (aiAnalysis.status === 'critical') {
@@ -875,6 +998,133 @@ export default function App() {
   );
 };
 
+const BatterySchematic = () => {
+  const callouts = [
+    { id: 1, label: "Positive Terminal", description: "Nickel-plated steel cap for high conductivity", x: 65, y: 10, side: 'right' },
+    { id: 2, label: "Safety Vent", description: "Pressure relief mechanism to prevent thermal runaway", x: 65, y: 25, side: 'right' },
+    { id: 3, label: "BMS Controller", description: "Real-time voltage and temperature monitoring logic", x: 65, y: 45, side: 'right' },
+    { id: 4, label: "Cathode Layer", description: "Lithium Cobalt Oxide (LiCoO2) high-density storage", x: 35, y: 60, side: 'left' },
+    { id: 5, label: "Separator", description: "Microporous polymer membrane for ion exchange", x: 35, y: 75, side: 'left' },
+    { id: 6, label: "Negative Terminal", description: "Copper current collector with graphite anode", x: 65, y: 90, side: 'right' },
+  ];
+
+  return (
+    <div className="relative w-full h-[700px] bg-gradient-to-br from-[#0a0a0a] to-[#1a1a1a] rounded-[2rem] border border-zinc-800 overflow-hidden flex items-center justify-center">
+      {/* Background Grid */}
+      <div className="absolute inset-0 opacity-10 pointer-events-none" 
+           style={{ backgroundImage: 'radial-gradient(#10b981 0.5px, transparent 0.5px)', backgroundSize: '30px 30px' }} />
+      
+      <div className="relative w-full max-w-5xl h-full flex items-center justify-center">
+        {/* Central Battery Cell */}
+        <motion.div 
+          initial={{ opacity: 0, y: 50 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="relative z-10 w-40 h-[450px] bg-zinc-900 border-2 border-zinc-700 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col items-center"
+        >
+          {/* Cap */}
+          <div className="w-16 h-6 bg-zinc-600 rounded-t-xl -mt-6 border-t border-zinc-400 relative">
+             <div className="absolute inset-0 bg-emerald-500/20 blur-md" />
+          </div>
+          
+          {/* Internal Layers visualization */}
+          <div className="w-full h-full p-3 space-y-2 overflow-hidden rounded-xl">
+            <div className="w-full h-1/5 bg-blue-500/10 rounded-lg border border-blue-500/20 flex items-center justify-center">
+               <div className="w-full h-px bg-blue-500/20" />
+            </div>
+            <div className="w-full h-3/5 bg-emerald-500/5 rounded-lg border border-emerald-500/10 flex flex-col gap-1 p-2">
+               {Array.from({length: 12}).map((_, i) => (
+                 <div key={i} className="w-full h-1 bg-emerald-500/10 rounded-full" />
+               ))}
+            </div>
+            <div className="w-full h-1/5 bg-zinc-800/50 rounded-lg border border-zinc-700 flex items-center justify-center">
+               <Zap className="w-6 h-6 text-zinc-700" />
+            </div>
+          </div>
+
+          {/* Glow */}
+          <div className="absolute -inset-4 bg-emerald-500/5 blur-3xl rounded-full -z-10" />
+        </motion.div>
+
+        {/* Callouts */}
+        {callouts.map((callout, i) => (
+          <motion.div
+            key={callout.id}
+            initial={{ opacity: 0, x: callout.side === 'right' ? 100 : -100 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.5 + i * 0.15, duration: 0.8, ease: "easeOut" }}
+            className={`absolute flex items-center gap-6 ${callout.side === 'right' ? 'left-1/2 ml-32' : 'right-1/2 mr-32'}`}
+            style={{ top: `${callout.y}%` }}
+          >
+            {callout.side === 'left' && (
+              <div className="text-right">
+                <div className="text-sm font-black text-white uppercase tracking-tighter mb-1">{callout.label}</div>
+                <div className="text-[10px] text-zinc-500 max-w-[180px] leading-relaxed font-mono">{callout.description}</div>
+              </div>
+            )}
+            
+            <div className="relative flex items-center">
+              {/* Connector Line with Elbow */}
+              <svg width="100" height="40" className={`absolute ${callout.side === 'right' ? '-left-[100px]' : '-right-[100px]'} top-1/2 -translate-y-1/2 overflow-visible pointer-events-none`}>
+                <motion.path
+                  d={callout.side === 'right' 
+                    ? "M 0 20 L 40 20 L 60 20 L 100 20" 
+                    : "M 100 20 L 60 20 L 40 20 L 0 20"}
+                  fill="none"
+                  stroke="#3f3f46"
+                  strokeWidth="1"
+                  initial={{ pathLength: 0 }}
+                  animate={{ pathLength: 1 }}
+                  transition={{ delay: 0.8 + i * 0.1, duration: 1 }}
+                />
+              </svg>
+              {/* Dot */}
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.8)] z-20" />
+            </div>
+
+            {callout.side === 'right' && (
+              <div className="text-left">
+                <div className="text-sm font-black text-white uppercase tracking-tighter mb-1">{callout.label}</div>
+                <div className="text-[10px] text-zinc-500 max-w-[180px] leading-relaxed font-mono">{callout.description}</div>
+              </div>
+            )}
+          </motion.div>
+        ))}
+
+        {/* Bottom Label - Rocket Style */}
+        <motion.div 
+          initial={{ opacity: 0, x: -50 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 1.5 }}
+          className="absolute bottom-16 left-16"
+        >
+          <div className="text-[11px] font-mono text-zinc-500 uppercase tracking-[0.5em] mb-3">Structural Analysis</div>
+          <h2 className="text-6xl font-black text-white tracking-tighter uppercase leading-none">
+            Cargo <span className="text-emerald-500">Hold</span>
+          </h2>
+          <motion.div 
+            initial={{ width: 0 }}
+            animate={{ width: 240 }}
+            transition={{ delay: 2, duration: 1 }}
+            className="h-1.5 bg-yellow-500 mt-4" 
+          />
+        </motion.div>
+
+        {/* Top Right Specs */}
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 1.8 }}
+          className="absolute top-16 right-16 text-right"
+        >
+          <div className="text-[10px] font-mono text-zinc-600 uppercase tracking-widest mb-1">Cell Specification</div>
+          <div className="text-xl font-bold text-zinc-300">21700 Form Factor</div>
+          <div className="text-[10px] font-mono text-emerald-500/60 mt-1">LITHIUM-ION POLYMER</div>
+        </motion.div>
+      </div>
+    </div>
+  );
+};
+
 const MainApp = ({ 
   cells, setCells, loading, saving, isAiMonitoring, setIsAiMonitoring, 
   isMuted, setIsMuted,
@@ -934,10 +1184,24 @@ const MainApp = ({
           </button>
           <button
             onClick={() => setIsAiMonitoring(!isAiMonitoring)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all text-sm font-medium border ${isAiMonitoring ? 'bg-purple-600/20 border-purple-500 text-purple-400' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-700'}`}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all text-sm font-medium border shadow-lg ${
+              isAiMonitoring 
+                ? aiAnalysis?.status === 'critical' 
+                  ? 'bg-red-600 border-red-400 text-white animate-bounce' 
+                  : aiAnalysis?.status === 'warning'
+                    ? 'bg-yellow-600 border-yellow-400 text-white animate-pulse'
+                    : 'bg-purple-600/20 border-purple-500 text-purple-400' 
+                : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-700'
+            }`}
           >
             <Brain className={`w-4 h-4 ${isAiMonitoring ? 'animate-pulse' : ''}`} />
-            {isAiMonitoring ? 'AI MONITORING ON' : 'START AI MONITOR'}
+            {isAiMonitoring 
+              ? aiAnalysis?.status === 'critical' 
+                ? 'AI CRITICAL ALERT' 
+                : aiAnalysis?.status === 'warning'
+                  ? 'AI WARNING ACTIVE'
+                  : 'AI MONITORING ON' 
+              : 'START AI MONITOR'}
           </button>
           <button
             onClick={() => setIsMuted(!isMuted)}
@@ -1232,6 +1496,12 @@ const MainApp = ({
             >
               Smart Home Simulation
             </button>
+            <button 
+              onClick={() => setActiveView('schematic')}
+              className={`px-4 py-1.5 rounded-lg text-[10px] font-mono uppercase tracking-widest transition-all ${activeView === 'schematic' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+            >
+              Schematic
+            </button>
           </div>
 
           {activeView === 'grid' ? (
@@ -1242,44 +1512,62 @@ const MainApp = ({
                 onSelect={setSelectedCell} 
                 timeOfDay={timeOfDay}
                 isAiMonitoring={isAiMonitoring}
+                aiCells={aiCells}
+                aiAnalysis={aiAnalysis}
               />
             ) : (
               <div className="bg-zinc-900/20 border border-zinc-800/50 p-4 rounded-3xl">
                 <div className="grid grid-cols-10 gap-1.5 md:gap-2">
-                  {cells.map((cell) => (
-                    <motion.button
-                      key={cell.id}
-                      whileHover={{ scale: 1.1, zIndex: 10 }}
-                      whileTap={{ scale: 0.9 }}
-                      onClick={() => setSelectedCell(cell)}
-                      className={`relative flex flex-col items-center justify-center p-1 rounded-full border transition-all aspect-square ${getStatusColor(cell)} ${selectedCell?.id === cell.id ? 'ring-1 ring-white ring-offset-2 ring-offset-[#0a0a0a]' : ''} ${timeOfDay !== 'night' ? 'shadow-[0_0_15px_rgba(251,191,36,0.2)]' : ''}`}
-                    >
-                      {timeOfDay !== 'night' && (
-                        <motion.div
-                          animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.6, 0.3] }}
-                          transition={{ duration: 2, repeat: Infinity }}
-                          className="absolute inset-0 rounded-full bg-yellow-400/20"
-                        />
-                      )}
-                      <Battery className={`w-3 h-3 md:w-4 md:h-4 ${timeOfDay !== 'night' ? 'text-yellow-500' : ''}`} />
-                      <div className="text-[6px] md:text-[8px] font-bold mt-0.5">{cell.voltage.toFixed(1)}V</div>
-                      <div className="text-[5px] md:text-[6px] opacity-50">{cell.soc}%</div>
-                      
-                      <svg className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none">
-                        <circle
-                          cx="50%"
-                          cy="50%"
-                          r="45%"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1"
-                          strokeDasharray="100"
-                          strokeDashoffset={100 - Math.min(100, (cell.temperature / 100) * 100)}
-                          className="opacity-10 transition-all duration-500"
-                        />
-                      </svg>
-                    </motion.button>
-                  ))}
+                  {cells.map((cell) => {
+                    const isAnomaly = aiCells.some(c => c.id === cell.id) && aiAnalysis?.status !== 'normal';
+                    return (
+                      <motion.button
+                        key={cell.id}
+                        whileHover={{ scale: 1.1, zIndex: 10 }}
+                        whileTap={{ scale: 0.9 }}
+                        animate={isAnomaly ? {
+                          boxShadow: [
+                            "0 0 0px rgba(239, 68, 68, 0)",
+                            "0 0 20px rgba(239, 68, 68, 0.8)",
+                            "0 0 0px rgba(239, 68, 68, 0)"
+                          ],
+                          scale: [1, 1.05, 1]
+                        } : {}}
+                        transition={isAnomaly ? {
+                          duration: 1.5,
+                          repeat: Infinity,
+                          ease: "easeInOut"
+                        } : {}}
+                        onClick={() => setSelectedCell(cell)}
+                        className={`relative flex flex-col items-center justify-center p-1 rounded-full border transition-all aspect-square ${getStatusColor(cell)} ${selectedCell?.id === cell.id ? 'ring-1 ring-white ring-offset-2 ring-offset-[#0a0a0a]' : ''} ${timeOfDay !== 'night' ? 'shadow-[0_0_15px_rgba(251,191,36,0.2)]' : ''} ${isAnomaly ? 'border-red-500 z-10' : ''}`}
+                      >
+                        {timeOfDay !== 'night' && (
+                          <motion.div
+                            animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.6, 0.3] }}
+                            transition={{ duration: 2, repeat: Infinity }}
+                            className="absolute inset-0 rounded-full bg-yellow-400/20"
+                          />
+                        )}
+                        <Battery className={`w-3 h-3 md:w-4 md:h-4 ${timeOfDay !== 'night' ? 'text-yellow-500' : ''}`} />
+                        <div className="text-[6px] md:text-[8px] font-bold mt-0.5">{cell.voltage.toFixed(1)}V</div>
+                        <div className="text-[5px] md:text-[6px] opacity-50">{cell.soc}%</div>
+                        
+                        <svg className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none">
+                          <circle
+                            cx="50%"
+                            cy="50%"
+                            r="45%"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1"
+                            strokeDasharray="100"
+                            strokeDashoffset={100 - Math.min(100, (cell.temperature / 100) * 100)}
+                            className="opacity-10 transition-all duration-500"
+                          />
+                        </svg>
+                      </motion.button>
+                    );
+                  })}
                 </div>
               </div>
             )
@@ -1392,6 +1680,8 @@ const MainApp = ({
                 </div>
               </div>
             </div>
+          ) : activeView === 'schematic' ? (
+            <BatterySchematic />
           ) : (
             <SmartHome 
               appliances={smartHomeAppliances} 
