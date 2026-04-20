@@ -7,6 +7,7 @@ interface PowerSankeyProps {
   solarPower: number;
   batteryPower: number; // Positive if discharging, negative if charging
   loadPower: number;
+  gridPower: number; // Positive if exporting to grid, negative if importing from grid
   width?: number;
   height?: number;
 }
@@ -28,6 +29,7 @@ export const PowerSankey: React.FC<PowerSankeyProps> = ({
   solarPower, 
   batteryPower, 
   loadPower,
+  gridPower,
   width = 600,
   height = 300
 }) => {
@@ -35,39 +37,52 @@ export const PowerSankey: React.FC<PowerSankeyProps> = ({
     const nodes: NodeExtra[] = [
       { id: 'solar', name: 'Solar Array', color: '#fbbf24' },
       { id: 'battery', name: 'Battery Pack', color: '#10b981' },
+      { id: 'grid', name: 'Utility Grid', color: '#a855f7' },
       { id: 'load', name: 'Smart Home Loads', color: '#f97316' },
     ];
 
     const links: { source: string; target: string; value: number; color: string }[] = [];
 
     // Logic for flows
-    if (batteryPower < 0) {
-      // Charging: Solar -> Battery
-      const chargingPower = Math.abs(batteryPower);
-      links.push({ source: 'solar', target: 'battery', value: chargingPower, color: '#fbbf24' });
-      
-      // Solar -> Load
-      if (solarPower > chargingPower) {
-        links.push({ source: 'solar', target: 'load', value: solarPower - chargingPower, color: '#fbbf24' });
-      }
-    } else {
-      // Discharging: Solar -> Load AND Battery -> Load
-      if (solarPower > 0) {
-        links.push({ source: 'solar', target: 'load', value: solarPower, color: '#fbbf24' });
-      }
-      if (batteryPower > 0) {
-        links.push({ source: 'battery', target: 'load', value: batteryPower, color: '#10b981' });
+    // Solar -> Load / Battery / Grid
+    if (solarPower > 0) {
+      if (batteryPower < 0) {
+        const chargingVal = Math.abs(batteryPower);
+        links.push({ source: 'solar', target: 'battery', value: chargingVal, color: '#fbbf24' });
+        if (solarPower > chargingVal) {
+          links.push({ source: 'solar', target: 'load', value: Math.min(loadPower, solarPower - chargingVal), color: '#fbbf24' });
+        }
+      } else {
+        links.push({ source: 'solar', target: 'load', value: Math.min(loadPower, solarPower), color: '#fbbf24' });
       }
     }
 
-    // Ensure values are at least 1 for visibility if active
-    const processedLinks = links.map(l => ({
+    // Battery -> Load / Grid
+    if (batteryPower > 0) {
+      links.push({ source: 'battery', target: 'load', value: Math.min(loadPower, batteryPower), color: '#10b981' });
+      if (gridPower > 0) {
+        links.push({ source: 'battery', target: 'grid', value: gridPower, color: '#10b981' });
+      }
+    }
+
+    // Grid -> Load (Import)
+    if (gridPower < 0) {
+      links.push({ source: 'grid', target: 'load', value: Math.abs(gridPower), color: '#a855f7' });
+    }
+
+    // Solar -> Grid (Export Excess)
+    if (solarPower > loadPower && gridPower > 0) {
+      links.push({ source: 'solar', target: 'grid', value: gridPower, color: '#fbbf24' });
+    }
+
+    // Filter out zero value links and ensure minimum visibility
+    const processedLinks = links.filter(l => l.value > 0.1).map(l => ({
       ...l,
       value: Math.max(1, l.value)
     }));
 
     return { nodes, links: processedLinks };
-  }, [solarPower, batteryPower, loadPower]);
+  }, [solarPower, batteryPower, loadPower, gridPower]);
 
   const { nodes, links } = useMemo(() => {
     const sankeyGenerator = sankey<NodeExtra, LinkExtra>()
@@ -156,6 +171,7 @@ export const PowerSankey: React.FC<PowerSankeyProps> = ({
               >
                 {node.id === 'load' ? loadPower.toFixed(1) : 
                  node.id === 'solar' ? solarPower.toFixed(1) : 
+                 node.id === 'grid' ? Math.abs(gridPower).toFixed(1) :
                  Math.abs(batteryPower).toFixed(1)}W
               </text>
             </g>

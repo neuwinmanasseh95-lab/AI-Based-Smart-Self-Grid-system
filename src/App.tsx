@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from "react-router-dom";
-import { Battery, Thermometer, Zap, Activity, Save, Download, RefreshCcw, Settings2, X, Brain, AlertTriangle, CheckCircle2, Sun, Gauge, Power, ArrowRightLeft, ExternalLink, Volume2, VolumeX } from "lucide-react";
+import { Battery, Thermometer, Zap, Activity, Save, Download, RefreshCcw, Settings2, X, Brain, AlertTriangle, CheckCircle2, Sun, Gauge, Power, ArrowRightLeft, ExternalLink, Volume2, VolumeX, Car, Globe, ShieldCheck, Database } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { GoogleGenAI, Type } from "@google/genai";
 
@@ -165,12 +165,12 @@ const Battery3D = ({
                 <motion.div 
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
-                  className="absolute left-[55%] top-[5%] flex items-center gap-4"
+                  className="absolute left-[60%] top-[10%] flex items-center gap-4"
                 >
                   <div className="relative flex items-center">
-                    <svg width="120" height="60" className="absolute -left-[120px] -top-[40px] overflow-visible">
+                    <svg width="150" height="150" className="absolute -left-[150px] -top-[100px] overflow-visible">
                       <motion.path
-                        d="M 120 50 L 80 50 L 40 10"
+                        d="M 150 120 L 100 120 L 50 200"
                         fill="none"
                         stroke="#10b981"
                         strokeWidth="1.5"
@@ -191,12 +191,12 @@ const Battery3D = ({
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.1 }}
-                  className="absolute left-[55%] top-[20%] flex items-center gap-4"
+                  className="absolute left-[60%] top-[25%] flex items-center gap-4"
                 >
                   <div className="relative flex items-center">
-                    <svg width="100" height="40" className="absolute -left-[100px] -top-[20px] overflow-visible">
+                    <svg width="150" height="100" className="absolute -left-[150px] -top-[50px] overflow-visible">
                       <motion.path
-                        d="M 100 30 L 70 30 L 40 10"
+                        d="M 150 70 L 100 70 L 50 120"
                         fill="none"
                         stroke="#3b82f6"
                         strokeWidth="1.5"
@@ -217,11 +217,11 @@ const Battery3D = ({
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.2 }}
-                  className="absolute left-[55%] top-[40%] flex items-center gap-4"
+                  className="absolute left-[60%] top-[45%] flex items-center gap-4"
                 >
                   <div className="relative flex items-center">
-                    <svg width="80" height="2" className="absolute -left-[80px] top-1/2 -translate-y-1/2">
-                      <line x1="0" y1="1" x2="80" y2="1" stroke="#3b82f6" strokeWidth="1.5" />
+                    <svg width="100" height="2" className="absolute -left-[100px] top-1/2 -translate-y-1/2">
+                      <line x1="0" y1="1" x2="100" y2="1" stroke="#3b82f6" strokeWidth="1.5" />
                     </svg>
                     <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_10px_#3b82f6]" />
                   </div>
@@ -236,11 +236,11 @@ const Battery3D = ({
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.3 }}
-                  className="absolute left-[55%] top-[60%] flex items-center gap-4"
+                  className="absolute left-[60%] top-[65%] flex items-center gap-4"
                 >
                   <div className="relative flex items-center">
-                    <svg width="80" height="2" className="absolute -left-[80px] top-1/2 -translate-y-1/2">
-                      <line x1="0" y1="1" x2="80" y2="1" stroke="#3b82f6" strokeWidth="1.5" />
+                    <svg width="100" height="2" className="absolute -left-[100px] top-1/2 -translate-y-1/2">
+                      <line x1="0" y1="1" x2="100" y2="1" stroke="#3b82f6" strokeWidth="1.5" />
                     </svg>
                     <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_10px_#3b82f6]" />
                   </div>
@@ -255,11 +255,11 @@ const Battery3D = ({
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.4 }}
-                  className="absolute left-[55%] top-[80%] flex items-center gap-4"
+                  className="absolute left-[60%] top-[85%] flex items-center gap-4"
                 >
                   <div className="relative flex items-center">
-                    <svg width="80" height="2" className="absolute -left-[80px] top-1/2 -translate-y-1/2">
-                      <line x1="0" y1="1" x2="80" y2="1" stroke={cell.temperature > 50 ? "#ef4444" : "#3b82f6"} strokeWidth="1.5" />
+                    <svg width="100" height="2" className="absolute -left-[100px] top-1/2 -translate-y-1/2">
+                      <line x1="0" y1="1" x2="100" y2="1" stroke={cell.temperature > 50 ? "#ef4444" : "#3b82f6"} strokeWidth="1.5" />
                     </svg>
                     <div className={`w-2 h-2 rounded-full ${cell.temperature > 50 ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : 'bg-blue-500 shadow-[0_0_10px_#3b82f6]'}`} />
                   </div>
@@ -313,7 +313,8 @@ const BatteryStack3D = ({
   timeOfDay,
   isAiMonitoring,
   aiCells = [],
-  aiAnalysis = null
+  aiAnalysis = null,
+  isCharging = false
 }: { 
   cells: BatteryCell[]; 
   selectedCell: BatteryCell | null; 
@@ -322,19 +323,23 @@ const BatteryStack3D = ({
   isAiMonitoring: boolean;
   aiCells?: BatteryCell[];
   aiAnalysis?: AIAnalysis | null;
+  isCharging?: boolean;
 }) => {
   const envPreset = timeOfDay === 'night' ? 'night' : timeOfDay === 'noon' ? 'city' : 'sunset';
   
+  const isEmergency = aiAnalysis?.status === 'critical' || aiAnalysis?.status === 'warning';
+  const isCritical = aiAnalysis?.status === 'critical';
+  
   return (
-    <div className="w-full h-[600px] bg-zinc-950 rounded-3xl overflow-hidden border border-zinc-800 relative shadow-inner cursor-default">
+    <div className={`w-full h-[600px] bg-zinc-950 rounded-3xl overflow-hidden border transition-all duration-500 relative shadow-inner cursor-default ${isCritical ? 'border-red-500 shadow-[0_0_50px_rgba(239,68,68,0.2)]' : 'border-zinc-800'}`}>
       <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
         <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-zinc-500 bg-black/50 px-2 py-1 rounded backdrop-blur-sm border border-zinc-800">
           3D Precision Stack • Click to Inspect
         </div>
         {isAiMonitoring && (
-          <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.2em] text-purple-400 bg-purple-500/10 px-2 py-1 rounded backdrop-blur-sm border border-purple-500/30 animate-pulse">
+          <div className={`flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.2em] px-2 py-1 rounded backdrop-blur-sm border animate-pulse ${isCritical ? 'text-red-400 bg-red-500/10 border-red-500/30' : 'text-purple-400 bg-purple-500/10 border-purple-500/30'}`}>
             <Brain className="w-3 h-3" />
-            AI Analysis Active
+            {isCritical ? 'EMERGENCY AI ALERT' : 'AI Analysis Active'}
           </div>
         )}
       </div>
@@ -349,9 +354,10 @@ const BatteryStack3D = ({
           makeDefault
         />
         
-        <ambientLight intensity={0.8} />
-        <spotLight position={[15, 20, 15]} angle={0.2} penumbra={1} intensity={2} castShadow />
-        <pointLight position={[-10, 10, -10]} intensity={1} color="#ffffff" />
+        <ambientLight intensity={isCritical ? 0.2 : 0.8} />
+        {isCritical && <pointLight position={[0, 5, 0]} intensity={5} color="#ef4444" />}
+        <spotLight position={[15, 20, 15]} angle={0.2} penumbra={1} intensity={isCritical ? 0.5 : 2} castShadow />
+        <pointLight position={[-10, 10, -10]} intensity={1} color={isCritical ? "#ef4444" : "#ffffff"} />
         
         <group position={[0, -0.2, 0]}>
           {cells.map((cell) => (
@@ -360,7 +366,7 @@ const BatteryStack3D = ({
               cell={cell} 
               isSelected={selectedCell?.id === cell.id}
               onSelect={onSelect}
-              isCharging={timeOfDay !== 'night'}
+              isCharging={isCharging}
               isAiMonitoring={isAiMonitoring}
               isAnomaly={aiCells.some(c => c.id === cell.id) && aiAnalysis?.status !== 'normal'}
             />
@@ -396,6 +402,51 @@ export default function App() {
   const [globalTargetTemp, setGlobalTargetTemp] = useState(25);
   const [capacityHistory, setCapacityHistory] = useState<{ time: string; soc: number }[]>([]);
   const [showRuntimeGraph, setShowRuntimeGraph] = useState(false);
+
+  // Power & Load State
+  const [solarVoltage, setSolarVoltage] = useState(300);
+  const [powerSource, setPowerSource] = useState<'battery' | 'solar'>('battery');
+
+  const [smartHomeAppliances, setSmartHomeAppliances] = useState<SmartHomeAppliance[]>([
+    { id: 'l1', name: 'Living Room Light', type: 'light', power: 45, isOn: false, x: 35, y: 64 },
+    { id: 'l8', name: 'Light 8 (Living Room)', type: 'light', power: 30, isOn: false, x: 12, y: 64 },
+    { id: 'tv1', name: 'Smart TV', type: 'tv', power: 180, isOn: false, x: 5, y: 80 },
+    { id: 'ac1', name: 'Master Bedroom AC', type: 'air_conditioner', power: 1600, isOn: false, x: 85, y: 35 },
+    { id: 'l9', name: 'Light 9 (Master Bed)', type: 'light', power: 30, isOn: false, x: 60, y: 35 },
+    { id: 'ref1', name: 'Smart Refrigerator', type: 'refrigerator', power: 220, isOn: true, x: 65, y: 85 },
+    { id: 'l2', name: 'Kitchen Task Light', type: 'light', power: 30, isOn: true, x: 75, y: 64 },
+    { id: 'wm1', name: 'Washing Machine', type: 'washing_machine', power: 600, isOn: false, x: 55, y: 85 },
+    { id: 'f1', name: 'Living Room Fan', type: 'fan', power: 85, isOn: false, x: 18, y: 64 },
+    { id: 'f3', name: 'Study Desk Lamp', type: 'light', power: 25, isOn: false, x: 15, y: 55 },
+    { id: 'l3', name: 'Loft Ambient Light', type: 'light', power: 40, isOn: false, x: 35, y: 35 },
+    { id: 'l4', name: 'Master Bedside Lamp', type: 'light', power: 25, isOn: false, x: 75, y: 56 },
+    { id: 'ev1', name: 'Garage EV Charger', type: 'ev_charger', power: 7200, isOn: false, x: 9, y: 55 },
+    { id: 'gw1', name: 'Utility Grid Gateway', type: 'grid_gateway', power: 20, isOn: true, x: 95, y: 8 },
+  ]);
+
+  // Smart Grid & Professional Research States
+  const [gridMode, setGridMode] = useState<'standby' | 'peak_shaving' | 'frequency_regulation'>('standby');
+  const [cyberSecurityIntegrity, setCyberSecurityIntegrity] = useState(99.9);
+  const [isDemandResponseActive, setIsDemandResponseActive] = useState(false);
+  const [gridFrequency, setGridFrequency] = useState(60.0);
+
+  const totalLoadPower = smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
+  const solarChargingPower = solarVoltage > 0 ? ((solarVoltage / 300) * 500) : 0;
+  
+  // Grid Power Calculation for research/paper context
+  const getGridPower = () => {
+    if (gridMode === 'frequency_regulation') {
+      // Balance grid frequency: if freq < 60, export from battery. If freq > 60, import to battery.
+      const diff = 60 - gridFrequency;
+      return diff * 5000; // Large swing for visual effect
+    }
+    if (gridMode === 'peak_shaving' && solarChargingPower > totalLoadPower) {
+      return solarChargingPower - totalLoadPower; // Export excess solar
+    }
+    if (isDemandResponseActive) return 1500; // Fixed export during DR event
+    return 0;
+  };
+  const gridPower = getGridPower();
 
   // Runtime Estimation
   const calculateRuntime = () => {
@@ -470,23 +521,6 @@ export default function App() {
     setSolarVoltage(solarMap[timeOfDay]);
   }, [timeOfDay]);
   
-  // Power & Load State
-  const [solarVoltage, setSolarVoltage] = useState(300);
-  const [powerSource, setPowerSource] = useState<'battery' | 'solar'>('battery');
-
-  const [smartHomeAppliances, setSmartHomeAppliances] = useState<SmartHomeAppliance[]>([
-    { id: 'l1', name: 'Living Room Light', type: 'light', power: 40, isOn: false, x: 25, y: 25 },
-    { id: 'tv1', name: 'Smart TV', type: 'tv', power: 150, isOn: false, x: 50, y: 40 },
-    { id: 'ac1', name: 'Air Conditioner', type: 'air_conditioner', power: 1500, isOn: false, x: 50, y: 20 },
-    { id: 'ref1', name: 'Refrigerator', type: 'refrigerator', power: 200, isOn: true, x: 85, y: 75 },
-    { id: 'l2', name: 'Kitchen Light', type: 'light', power: 40, isOn: false, x: 75, y: 75 },
-    { id: 'wm1', name: 'Washing Machine', type: 'washing_machine', power: 500, isOn: false, x: 15, y: 85 },
-    { id: 'f1', name: 'Ceiling Fan', type: 'fan', power: 75, isOn: false, x: 25, y: 75 },
-    { id: 'f3', name: 'Fan 3', type: 'fan', power: 75, isOn: false, x: 75, y: 25 },
-    { id: 'l8', name: 'Light 8', type: 'light', power: 40, isOn: false, x: 10, y: 10 },
-    { id: 'l9', name: 'Light 9', type: 'light', power: 40, isOn: false, x: 90, y: 90 },
-  ]);
-
   const toggleAppliance = async (id: string) => {
     const updated = smartHomeAppliances.map(app => 
       app.id === id ? { ...app, isOn: !app.isOn } : app
@@ -531,26 +565,45 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(false);
   const lastAiAnalysisTime = useRef<number>(0);
   const prevStatusRef = useRef<'normal' | 'warning' | 'critical' | null>(null);
-  const continuousAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const oscillatorRef = useRef<OscillatorNode | null>(null);
 
   // Sound Alert Effect
   useEffect(() => {
-    // Handle Continuous Anomaly Beep
+    // Handle Continuous Anomaly Beep (High Pitch)
     const hasAnomaly = aiAnalysis && (aiAnalysis.status === 'critical' || aiAnalysis.status === 'warning');
     
     if (isAiMonitoring && hasAnomaly && !isMuted) {
-      if (!continuousAudioRef.current) {
-        // Using a long, clean beep sound
-        continuousAudioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/1001/1001-preview.mp3');
-        continuousAudioRef.current.loop = true;
-        continuousAudioRef.current.volume = 0.2;
-        continuousAudioRef.current.play().catch(() => {});
+      if (!audioCtxRef.current) {
+        try {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          audioCtxRef.current = new AudioContextClass();
+          const gainNode = audioCtxRef.current.createGain();
+          oscillatorRef.current = audioCtxRef.current.createOscillator();
+
+          oscillatorRef.current.type = 'sine';
+          oscillatorRef.current.frequency.setValueAtTime(1200, audioCtxRef.current.currentTime);
+          gainNode.gain.setValueAtTime(0.05, audioCtxRef.current.currentTime);
+
+          oscillatorRef.current.connect(gainNode);
+          gainNode.connect(audioCtxRef.current.destination);
+          oscillatorRef.current.start();
+        } catch (e) {
+          console.error("AudioContext failed:", e);
+        }
       }
     } else {
-      if (continuousAudioRef.current) {
-        continuousAudioRef.current.pause();
-        continuousAudioRef.current.currentTime = 0;
-        continuousAudioRef.current = null;
+      if (oscillatorRef.current) {
+        try {
+          oscillatorRef.current.stop();
+        } catch (e) {}
+        oscillatorRef.current = null;
+      }
+      if (audioCtxRef.current) {
+        try {
+          audioCtxRef.current.close();
+        } catch (e) {}
+        audioCtxRef.current = null;
       }
     }
 
@@ -596,6 +649,7 @@ export default function App() {
 
       // EMERGENCY OVERRIDE: If AI detects anomaly, force solar and shutdown battery
       const isEmergency = aiAnalysis?.status === 'critical' || aiAnalysis?.status === 'warning';
+      const isCritical = aiAnalysis?.status === 'critical';
       
       if (isEmergency) {
         nextPowerSource = 'solar';
@@ -655,8 +709,9 @@ export default function App() {
           let newSoh = cell.soh;
 
           // Simultaneous Charge/Discharge Logic
-          const chargeRate = !isBatteryFull ? (solarChargeCurrent / 100) : 0;
-          const dischargeRate = (nextPowerSource === 'battery') ? (totalLoadCurrent / 100) : 0;
+          // Cut off battery completely if critical
+          const chargeRate = (!isBatteryFull && !isCritical) ? (solarChargeCurrent / 100) : 0;
+          const dischargeRate = (nextPowerSource === 'battery' && !isCritical) ? (totalLoadCurrent / 100) : 0;
           const netRate = chargeRate - dischargeRate;
 
           // Update SOC and Voltage based on net rate
@@ -746,6 +801,18 @@ export default function App() {
 
   // Internal Telemetry Sync for Remote Dashboard API
   useEffect(() => {
+    const interval = setInterval(() => {
+      setGridFrequency(59.95 + Math.random() * 0.1);
+      if (Math.random() > 0.99) {
+        setCyberSecurityIntegrity(prev => Math.max(80, prev - Math.random() * 5));
+      } else {
+        setCyberSecurityIntegrity(prev => Math.min(100, prev + 0.1));
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
     const interval = setInterval(async () => {
       const totalLoadPower = smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
       const avgSoc = cells.reduce((acc, c) => acc + c.soc, 0) / cells.length;
@@ -780,6 +847,27 @@ export default function App() {
     }, 1000);
     return () => clearInterval(interval);
   }, [cells, smartHomeAppliances, solarVoltage, aiAnalysis]);
+
+  useEffect(() => {
+    if (isDemandResponseActive) {
+      const nonEssentialTypes = ['air_conditioner', 'washing_machine', 'ev_charger'];
+      setSmartHomeAppliances(prev => prev.map(app => {
+        if (nonEssentialTypes.includes(app.type) && app.isOn) {
+          return { ...app, isOn: false };
+        }
+        return app;
+      }));
+      // Auto-set Status for AI to pick up
+      if (!aiAnalysis || aiAnalysis.status === 'normal') {
+        setAiAnalysis({
+          cells: [],
+          status: 'warning',
+          alert: 'GRID-INITIATED DD RESPONSE EVENT',
+          recommendation: 'Non-essential high-power loads (AC, EVs) have been autonomously shed to stabilize local frequency regulation.'
+        });
+      }
+    }
+  }, [isDemandResponseActive]);
 
   // AI Monitoring Interval
   useEffect(() => {
@@ -820,9 +908,16 @@ export default function App() {
         System Context:
         Power Source: ${powerSource}, Solar: ${solarVoltage}V, Smart Home Load: ${smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0)}W.
         
-        Representative Sample: ${JSON.stringify(cells.slice(0, 15))}
+        Full Battery Pack Data (100 Cells): ${JSON.stringify(cells)}
         Detected Outliers (Single Cell Variances): ${JSON.stringify(outliers)}
-        (If outliers are present, prioritize reporting them immediately)`,
+        
+        Research Focus Areas:
+        - Digital Twin Calibration: Ensure the virtual model matches physical telemetry.
+        - Cybersecurity: Note any suspicious patterns in cell communication.
+        - Smart Grid Integration: Advise on how the pack can support the grid (e.g., peak shaving).
+        - Demand Response: Should non-essential loads be shed to preserve pack health?
+        
+        (Identify ALL cells that show anomalies, not just the outliers)`,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -992,136 +1087,17 @@ export default function App() {
           showRuntimeGraph={showRuntimeGraph}
           setShowRuntimeGraph={setShowRuntimeGraph}
           getRuntimeProjectionData={getRuntimeProjectionData}
+          gridMode={gridMode}
+          setGridMode={setGridMode}
+          cyberSecurityIntegrity={cyberSecurityIntegrity}
+          isDemandResponseActive={isDemandResponseActive}
+          setIsDemandResponseActive={setIsDemandResponseActive}
+          gridFrequency={gridFrequency}
+          solarChargingPower={solarChargingPower}
+          gridPower={gridPower}
         />} />
       </Routes>
     </Router>
-  );
-};
-
-const BatterySchematic = () => {
-  const callouts = [
-    { id: 1, label: "Positive Terminal", description: "Nickel-plated steel cap for high conductivity", x: 65, y: 10, side: 'right' },
-    { id: 2, label: "Safety Vent", description: "Pressure relief mechanism to prevent thermal runaway", x: 65, y: 25, side: 'right' },
-    { id: 3, label: "BMS Controller", description: "Real-time voltage and temperature monitoring logic", x: 65, y: 45, side: 'right' },
-    { id: 4, label: "Cathode Layer", description: "Lithium Cobalt Oxide (LiCoO2) high-density storage", x: 35, y: 60, side: 'left' },
-    { id: 5, label: "Separator", description: "Microporous polymer membrane for ion exchange", x: 35, y: 75, side: 'left' },
-    { id: 6, label: "Negative Terminal", description: "Copper current collector with graphite anode", x: 65, y: 90, side: 'right' },
-  ];
-
-  return (
-    <div className="relative w-full h-[700px] bg-gradient-to-br from-[#0a0a0a] to-[#1a1a1a] rounded-[2rem] border border-zinc-800 overflow-hidden flex items-center justify-center">
-      {/* Background Grid */}
-      <div className="absolute inset-0 opacity-10 pointer-events-none" 
-           style={{ backgroundImage: 'radial-gradient(#10b981 0.5px, transparent 0.5px)', backgroundSize: '30px 30px' }} />
-      
-      <div className="relative w-full max-w-5xl h-full flex items-center justify-center">
-        {/* Central Battery Cell */}
-        <motion.div 
-          initial={{ opacity: 0, y: 50 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="relative z-10 w-40 h-[450px] bg-zinc-900 border-2 border-zinc-700 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col items-center"
-        >
-          {/* Cap */}
-          <div className="w-16 h-6 bg-zinc-600 rounded-t-xl -mt-6 border-t border-zinc-400 relative">
-             <div className="absolute inset-0 bg-emerald-500/20 blur-md" />
-          </div>
-          
-          {/* Internal Layers visualization */}
-          <div className="w-full h-full p-3 space-y-2 overflow-hidden rounded-xl">
-            <div className="w-full h-1/5 bg-blue-500/10 rounded-lg border border-blue-500/20 flex items-center justify-center">
-               <div className="w-full h-px bg-blue-500/20" />
-            </div>
-            <div className="w-full h-3/5 bg-emerald-500/5 rounded-lg border border-emerald-500/10 flex flex-col gap-1 p-2">
-               {Array.from({length: 12}).map((_, i) => (
-                 <div key={i} className="w-full h-1 bg-emerald-500/10 rounded-full" />
-               ))}
-            </div>
-            <div className="w-full h-1/5 bg-zinc-800/50 rounded-lg border border-zinc-700 flex items-center justify-center">
-               <Zap className="w-6 h-6 text-zinc-700" />
-            </div>
-          </div>
-
-          {/* Glow */}
-          <div className="absolute -inset-4 bg-emerald-500/5 blur-3xl rounded-full -z-10" />
-        </motion.div>
-
-        {/* Callouts */}
-        {callouts.map((callout, i) => (
-          <motion.div
-            key={callout.id}
-            initial={{ opacity: 0, x: callout.side === 'right' ? 100 : -100 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.5 + i * 0.15, duration: 0.8, ease: "easeOut" }}
-            className={`absolute flex items-center gap-6 ${callout.side === 'right' ? 'left-1/2 ml-32' : 'right-1/2 mr-32'}`}
-            style={{ top: `${callout.y}%` }}
-          >
-            {callout.side === 'left' && (
-              <div className="text-right">
-                <div className="text-sm font-black text-white uppercase tracking-tighter mb-1">{callout.label}</div>
-                <div className="text-[10px] text-zinc-500 max-w-[180px] leading-relaxed font-mono">{callout.description}</div>
-              </div>
-            )}
-            
-            <div className="relative flex items-center">
-              {/* Connector Line with Elbow */}
-              <svg width="100" height="40" className={`absolute ${callout.side === 'right' ? '-left-[100px]' : '-right-[100px]'} top-1/2 -translate-y-1/2 overflow-visible pointer-events-none`}>
-                <motion.path
-                  d={callout.side === 'right' 
-                    ? "M 0 20 L 40 20 L 60 20 L 100 20" 
-                    : "M 100 20 L 60 20 L 40 20 L 0 20"}
-                  fill="none"
-                  stroke="#3f3f46"
-                  strokeWidth="1"
-                  initial={{ pathLength: 0 }}
-                  animate={{ pathLength: 1 }}
-                  transition={{ delay: 0.8 + i * 0.1, duration: 1 }}
-                />
-              </svg>
-              {/* Dot */}
-              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.8)] z-20" />
-            </div>
-
-            {callout.side === 'right' && (
-              <div className="text-left">
-                <div className="text-sm font-black text-white uppercase tracking-tighter mb-1">{callout.label}</div>
-                <div className="text-[10px] text-zinc-500 max-w-[180px] leading-relaxed font-mono">{callout.description}</div>
-              </div>
-            )}
-          </motion.div>
-        ))}
-
-        {/* Bottom Label - Rocket Style */}
-        <motion.div 
-          initial={{ opacity: 0, x: -50 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 1.5 }}
-          className="absolute bottom-16 left-16"
-        >
-          <div className="text-[11px] font-mono text-zinc-500 uppercase tracking-[0.5em] mb-3">Structural Analysis</div>
-          <h2 className="text-6xl font-black text-white tracking-tighter uppercase leading-none">
-            Cargo <span className="text-emerald-500">Hold</span>
-          </h2>
-          <motion.div 
-            initial={{ width: 0 }}
-            animate={{ width: 240 }}
-            transition={{ delay: 2, duration: 1 }}
-            className="h-1.5 bg-yellow-500 mt-4" 
-          />
-        </motion.div>
-
-        {/* Top Right Specs */}
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.8 }}
-          className="absolute top-16 right-16 text-right"
-        >
-          <div className="text-[10px] font-mono text-zinc-600 uppercase tracking-widest mb-1">Cell Specification</div>
-          <div className="text-xl font-bold text-zinc-300">21700 Form Factor</div>
-          <div className="text-[10px] font-mono text-emerald-500/60 mt-1">LITHIUM-ION POLYMER</div>
-        </motion.div>
-      </div>
-    </div>
   );
 };
 
@@ -1136,10 +1112,14 @@ const MainApp = ({
   globalTargetTemp, setGlobalTargetTemp, show3D, setShow3D, timeOfDay,
   setTimeOfDay, isFullscreen, toggleFullscreen, selectedCell, 
   setSelectedCell, updateCell, saveCells, showRuntimeGraph, 
-  setShowRuntimeGraph, getRuntimeProjectionData
+  setShowRuntimeGraph, getRuntimeProjectionData,
+  gridMode, setGridMode, cyberSecurityIntegrity, isDemandResponseActive,
+  setIsDemandResponseActive, gridFrequency, solarChargingPower, gridPower
 }: any) => {
   const navigate = useNavigate();
   const totalLoadPower = smartHomeAppliances.reduce((acc, app: any) => acc + (app.isOn ? app.power : 0), 0);
+  const isEmergency = aiAnalysis?.status === 'critical' || aiAnalysis?.status === 'warning';
+  const isCritical = aiAnalysis?.status === 'critical';
   
   if (loading) {
     return (
@@ -1277,6 +1257,62 @@ const MainApp = ({
               onChange={(e) => setSolarVoltage(parseInt(e.target.value))}
               className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-yellow-500"
             />
+          </div>
+
+          {/* Smart Grid Control Panel */}
+          <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Globe className="w-5 h-5 text-purple-500" />
+                <span className="text-xs font-mono uppercase tracking-widest text-zinc-500">Grid Integration</span>
+              </div>
+              <div className={`text-[10px] font-mono px-2 py-0.5 rounded ${isDemandResponseActive ? 'bg-red-500/20 text-red-500 animate-pulse' : 'bg-emerald-500/20 text-emerald-500'}`}>
+                {isDemandResponseActive ? 'DR EVENT ACTIVE' : 'GRID STABLE'}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2">
+              <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 flex justify-between items-center">
+                <div>
+                  <div className="text-[10px] font-mono text-zinc-600 uppercase">Frequency</div>
+                  <div className="text-sm font-bold text-white">{gridFrequency.toFixed(3)} Hz</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] font-mono text-zinc-600 uppercase">Security Score</div>
+                  <div className={`text-sm font-bold ${cyberSecurityIntegrity > 95 ? 'text-emerald-500' : 'text-red-500'}`}>{cyberSecurityIntegrity.toFixed(1)}%</div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest px-1">Grid Services Mode</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['standby', 'peak_shaving', 'frequency_regulation'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setGridMode(mode)}
+                      className={`text-[8px] font-bold uppercase py-2 rounded-lg border transition-all ${
+                        gridMode === mode 
+                          ? 'bg-purple-500/20 border-purple-500 text-purple-400' 
+                          : 'bg-zinc-800/50 border-zinc-700 text-zinc-600 hover:bg-zinc-800'
+                      }`}
+                    >
+                      {mode.replace('_', ' ')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              <button
+                onClick={() => setIsDemandResponseActive(!isDemandResponseActive)}
+                className={`w-full py-2 rounded-lg border text-[10px] font-black uppercase tracking-widest transition-all ${
+                  isDemandResponseActive 
+                    ? 'bg-red-500 border-red-400 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)]' 
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-700'
+                }`}
+              >
+                {isDemandResponseActive ? 'DISENGAGE DEMAND RESPONSE' : 'SIMULATE GRID EVENT'}
+              </button>
+            </div>
           </div>
 
           {/* Smart Home Load Summary */}
@@ -1496,12 +1532,6 @@ const MainApp = ({
             >
               Smart Home Simulation
             </button>
-            <button 
-              onClick={() => setActiveView('schematic')}
-              className={`px-4 py-1.5 rounded-lg text-[10px] font-mono uppercase tracking-widest transition-all ${activeView === 'schematic' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-            >
-              Schematic
-            </button>
           </div>
 
           {activeView === 'grid' ? (
@@ -1514,6 +1544,7 @@ const MainApp = ({
                 isAiMonitoring={isAiMonitoring}
                 aiCells={aiCells}
                 aiAnalysis={aiAnalysis}
+                isCharging={timeOfDay !== 'night' && !isEmergency}
               />
             ) : (
               <div className="bg-zinc-900/20 border border-zinc-800/50 p-4 rounded-3xl">
@@ -1539,16 +1570,16 @@ const MainApp = ({
                           ease: "easeInOut"
                         } : {}}
                         onClick={() => setSelectedCell(cell)}
-                        className={`relative flex flex-col items-center justify-center p-1 rounded-full border transition-all aspect-square ${getStatusColor(cell)} ${selectedCell?.id === cell.id ? 'ring-1 ring-white ring-offset-2 ring-offset-[#0a0a0a]' : ''} ${timeOfDay !== 'night' ? 'shadow-[0_0_15px_rgba(251,191,36,0.2)]' : ''} ${isAnomaly ? 'border-red-500 z-10' : ''}`}
+                        className={`relative flex flex-col items-center justify-center p-1 rounded-full border transition-all aspect-square ${getStatusColor(cell)} ${selectedCell?.id === cell.id ? 'ring-1 ring-white ring-offset-2 ring-offset-[#0a0a0a]' : ''} ${timeOfDay !== 'night' && !isEmergency ? 'shadow-[0_0_15px_rgba(251,191,36,0.2)]' : ''} ${isAnomaly ? 'border-red-500 z-10' : ''}`}
                       >
-                        {timeOfDay !== 'night' && (
+                        {timeOfDay !== 'night' && !isEmergency && (
                           <motion.div
                             animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.6, 0.3] }}
                             transition={{ duration: 2, repeat: Infinity }}
                             className="absolute inset-0 rounded-full bg-yellow-400/20"
                           />
                         )}
-                        <Battery className={`w-3 h-3 md:w-4 md:h-4 ${timeOfDay !== 'night' ? 'text-yellow-500' : ''}`} />
+                        <Battery className={`w-3 h-3 md:w-4 md:h-4 ${timeOfDay !== 'night' && !isEmergency ? 'text-yellow-500' : ''}`} />
                         <div className="text-[6px] md:text-[8px] font-bold mt-0.5">{cell.voltage.toFixed(1)}V</div>
                         <div className="text-[5px] md:text-[6px] opacity-50">{cell.soc}%</div>
                         
@@ -1653,9 +1684,10 @@ const MainApp = ({
 
                   <div className="w-full max-w-3xl aspect-[16/8] bg-zinc-900/20 rounded-3xl border border-zinc-800/50 p-8 flex items-center justify-center">
                     <PowerSankey 
-                      solarPower={(solarVoltage / 300) * 500}
-                      batteryPower={totalLoadPower - ((solarVoltage / 300) * 500)}
+                      solarPower={solarChargingPower}
+                      batteryPower={isEmergency ? 0 : (totalLoadPower - solarChargingPower + gridPower)}
                       loadPower={totalLoadPower}
+                      gridPower={gridPower}
                       width={700}
                       height={300}
                     />
@@ -1680,8 +1712,6 @@ const MainApp = ({
                 </div>
               </div>
             </div>
-          ) : activeView === 'schematic' ? (
-            <BatterySchematic />
           ) : (
             <SmartHome 
               appliances={smartHomeAppliances} 
@@ -1694,48 +1724,101 @@ const MainApp = ({
 
         {/* Right Column: AI Analysis & Capacity Graph */}
         <div className="xl:col-span-1 space-y-6">
-          {/* Capacity History Graph */}
-          <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <Activity className="w-4 h-4 text-emerald-500" />
-                <span className="text-xs font-mono uppercase tracking-widest text-zinc-500">Capacity History</span>
-              </div>
-              <div className="text-[10px] font-mono text-emerald-500">Avg SOC: {capacityHistory[capacityHistory.length - 1]?.soc || 0}%</div>
-            </div>
-            <div className="h-40 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={capacityHistory}>
-                  <defs>
-                    <linearGradient id="colorSoc" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                  <XAxis dataKey="time" hide />
-                  <YAxis domain={[0, 100]} hide />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', fontSize: '10px' }}
-                    itemStyle={{ color: '#10b981' }}
-                  />
-                  <Area type="monotone" dataKey="soc" stroke="#10b981" fillOpacity={1} fill="url(#colorSoc)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+          {/* Capacity History Graph OR AI Insight during Alert */}
+          <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-2xl min-h-[200px]">
+            {isEmergency ? (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="h-full flex flex-col"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="w-4 h-4 text-emerald-500" />
+                    <span className="text-xs font-mono uppercase tracking-widest text-emerald-500">AI Insight</span>
+                  </div>
+                  <button onClick={() => setAiAnalysis(null)} className="p-1 hover:bg-white/10 rounded-full">
+                    <X className="w-3 h-3 text-emerald-500" />
+                  </button>
+                </div>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                      <div className="text-[10px] font-mono text-zinc-500 uppercase mb-1">Frequency</div>
+                      <div className="text-sm font-bold text-purple-400">{gridFrequency.toFixed(3)}Hz</div>
+                    </div>
+                    <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                      <div className="text-[10px] font-mono text-zinc-500 uppercase mb-1">Cyber IQ</div>
+                      <div className={`text-sm font-bold ${cyberSecurityIntegrity > 98 ? 'text-emerald-500' : 'text-red-500'}`}>{cyberSecurityIntegrity.toFixed(1)}%</div>
+                    </div>
+                  </div>
+                  
+                  <p className="text-sm font-bold text-emerald-400 leading-tight">
+                    {aiAnalysis.alert}
+                  </p>
+                  <p className="text-xs text-emerald-500/70 leading-relaxed italic border-l-2 border-emerald-500/30 pl-3">
+                    {aiAnalysis.recommendation}
+                  </p>
+                  <div className="flex items-center gap-2 text-[8px] font-mono text-zinc-500">
+                    <Database className="w-2 h-2" />
+                    RESEARCH-DT SYNC: {new Date().toLocaleTimeString()}
+                  </div>
+                </div>
+              </motion.div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <Activity className="w-4 h-4 text-emerald-500" />
+                    <span className="text-xs font-mono uppercase tracking-widest text-zinc-500">Capacity History</span>
+                  </div>
+                  <div className="text-[10px] font-mono text-emerald-500">Avg SOC: {capacityHistory[capacityHistory.length - 1]?.soc || 0}%</div>
+                </div>
+                <div className="h-40 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={capacityHistory}>
+                      <defs>
+                        <linearGradient id="colorSoc" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                      <XAxis dataKey="time" hide />
+                      <YAxis domain={[0, 100]} hide />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', fontSize: '10px' }}
+                        itemStyle={{ color: '#10b981' }}
+                      />
+                      <Area type="monotone" dataKey="soc" stroke="#10b981" fillOpacity={1} fill="url(#colorSoc)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            )}
           </div>
 
           <AnimatePresence>
             {isAiMonitoring ? (
               <motion.div
                 initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
+                animate={{ 
+                  opacity: 1, 
+                  x: 0,
+                  borderColor: aiAnalysis?.status === 'critical' ? ['#ef4444', '#7f1d1d', '#ef4444'] : '#27272a',
+                  borderWidth: aiAnalysis?.status === 'critical' ? 3 : 1,
+                  backgroundColor: aiAnalysis?.status === 'critical' ? 'rgba(239, 68, 68, 0.05)' : 'rgba(24, 24, 27, 0.3)'
+                }}
+                transition={{
+                  borderColor: { duration: 1, repeat: Infinity, ease: "easeInOut" },
+                  duration: 0.3
+                }}
                 exit={{ opacity: 0, x: 20 }}
-                className="space-y-6"
+                className="space-y-6 p-5 rounded-3xl border"
               >
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-mono uppercase tracking-[0.3em] text-purple-500 flex items-center gap-2">
-                    <Brain className="w-4 h-4" />
+                  <h3 className={`text-xs font-mono uppercase tracking-[0.3em] flex items-center gap-2 ${aiAnalysis?.status === 'critical' ? 'text-red-500' : 'text-purple-500'}`}>
+                    <Brain className={`w-4 h-4 ${aiAnalysis?.status === 'critical' ? 'animate-bounce' : ''}`} />
                     Digital Twin
                   </h3>
                   {isAiAnalyzing && <RefreshCcw className="w-3 h-3 text-purple-500 animate-spin" />}
