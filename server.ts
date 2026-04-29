@@ -95,9 +95,9 @@ async function startServer() {
         res.status(500).json({ error: "Failed to parse battery data" });
       }
     } else {
-      // Return default 10x10 grid if no data exists
-      const defaultData = Array.from({ length: 100 }, (_, i) => ({
-        id: i,
+      // Return default 50x50 grid (50 modules, 50 cells each)
+      const defaultData = Array.from({ length: 2500 }, (_, i) => ({
+        id: `cell-${Math.floor(i / 50)}-${i % 50}`,
         name: `Cell ${i + 1}`,
         voltage: 3.7,
         current: 0.5,

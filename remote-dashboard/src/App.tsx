@@ -236,7 +236,7 @@ export default function App() {
                           <h4 className={`text-sm font-bold uppercase tracking-tighter ${
                             aiAnalysis.status === 'critical' ? 'text-red-400' : 'text-yellow-400'
                           }`}>
-                            AI System Alert: {aiAnalysis.status.toUpperCase()}
+                            AI System Alert: {(aiAnalysis?.status || '').toUpperCase()}
                           </h4>
                           <Brain className="w-4 h-4 text-purple-500 animate-pulse" />
                         </div>
@@ -286,7 +286,7 @@ export default function App() {
                           <div className={`text-sm font-bold tracking-tight transition-colors ${
                             app.isOn ? 'text-white' : 'text-zinc-500'
                           }`}>
-                            {app.name.toUpperCase()}
+                            {(app?.name || '').toUpperCase()}
                           </div>
                           <div className="text-[10px] font-mono text-zinc-600">
                             CONSUMPTION: {app.power}W

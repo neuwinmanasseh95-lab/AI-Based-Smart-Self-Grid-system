@@ -13,7 +13,8 @@ import {
   Tv,
   Refrigerator,
   WashingMachine,
-  Power
+  Power,
+  RefreshCcw
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -25,8 +26,6 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
-import { SmartHomeAppliance } from './SmartHome';
-
 interface TelemetryData {
   solarVoltage: number;
   packVoltage: number;
@@ -40,18 +39,39 @@ interface TelemetryData {
     message: string;
     location: string;
   };
-  metadata?: {
-    total_voltage: string;
-    avg_temp: string;
-    power_source: string;
-    solar_voltage: number;
-    smart_home_load: number;
-  }
 }
 
-export const RemoteDashboard = ({ onBack }: { onBack: () => void }) => {
-  const [data, setData] = useState<TelemetryData | null>(null);
-  const [appliances, setAppliances] = useState<SmartHomeAppliance[]>([]);
+interface EvSubsystem {
+  id: string;
+  name: string;
+  type: string;
+  power: number;
+  isOn: boolean;
+}
+
+export const RemoteDashboard = ({ 
+  onBack, 
+  simulationSpeed, 
+  setSimulationSpeed,
+  modules,
+  throttle,
+  evChargingInput,
+  chargeCycles
+}: { 
+  onBack: () => void;
+  simulationSpeed?: number;
+  setSimulationSpeed?: (v: number) => void;
+  modules?: any[];
+  throttle?: number;
+  evChargingInput?: number;
+  chargeCycles?: number;
+}) => {
+  const [subsystems, setSubsystems] = useState<EvSubsystem[]>([
+    { id: 'hvac', name: 'Pack Thermal Control', type: 'fan', power: 1200, isOn: true },
+    { id: 'coolant', name: 'Active Coolant Pump', type: 'fan', power: 800, isOn: true },
+    { id: 'bms', name: 'Master BMS Logic', type: 'cpu', power: 150, isOn: true },
+    { id: 'cabin', name: 'Infotainment System', type: 'tv', power: 450, isOn: true },
+  ]);
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
@@ -59,87 +79,76 @@ export const RemoteDashboard = ({ onBack }: { onBack: () => void }) => {
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [telemetryRes, appliancesRes] = await Promise.all([
-          fetch("/api/telemetry"),
-          fetch("/api/appliances")
-        ]);
-        const telemetry = await telemetryRes.json();
-        const apps = await appliancesRes.json();
-        setData(telemetry);
-        setAppliances(apps);
-      } catch (err) {
-        console.error("Fetch error:", err);
+  const data = useMemo(() => {
+    if (!modules || modules.length === 0) return null;
+    
+    // Average everything across modules
+    const allCells = modules.flatMap(m => m.cells || []);
+    const avgSoc = allCells.reduce((acc, c) => acc + (c.soc || 0), 0) / (allCells.length || 1);
+    const avgTemp = allCells.reduce((acc, c) => acc + (c.temperature || 0), 0) / (allCells.length || 1);
+    const avgVoltage = allCells.reduce((acc, c) => acc + (c.voltage || 0), 0) / (allCells.length || 1);
+    
+    return {
+      solarVoltage: evChargingInput ? (evChargingInput / 10) : 0,
+      packVoltage: avgVoltage * 100, // assuming 100s configuration for total pack
+      loadPowerWatts: (throttle || 0) * 1500, // 150kW max
+      loadPowerPercent: throttle || 0,
+      soc: Math.round(avgSoc),
+      temp: avgTemp,
+      current: (throttle || 0) * 4, // simplistic current calc
+      anomalyDetected: avgTemp > 65 || avgSoc < 5,
+      anomalyDetails: {
+        message: avgTemp > 65 ? "Thermal Overload Imminent" : "Critical Low Capacity",
+        location: "Module " + (modules[0]?.id || "0")
       }
     };
-    fetchData();
-    const interval = setInterval(fetchData, 2000);
-    return () => clearInterval(interval);
-  }, []);
+  }, [modules, throttle, evChargingInput]);
 
-  const toggleAppliance = async (id: string) => {
-    const updated = appliances.map(app => 
-      app.id === id ? { ...app, isOn: !app.isOn } : app
-    );
-    setAppliances(updated);
-    
-    try {
-      await fetch("/api/appliances", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updated),
-      });
-    } catch (e) {
-      console.error("Failed to sync appliances:", e);
-    }
+  const toggleSubsystem = (id: string) => {
+    setSubsystems(prev => prev.map(sub => 
+      sub.id === id ? { ...sub, isOn: !sub.isOn } : sub
+    ));
   };
 
-  const calculateRuntime = () => {
-    if (!data) return "00:00";
-    const totalLoadPower = appliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
-    const solarChargingPower = data.solarVoltage > 0 ? ((data.solarVoltage / 300) * 500) : 0;
-    const netPower = totalLoadPower - solarChargingPower;
+  const calculateRange = () => {
+    if (!data) return "0 km";
+    const totalLoadPower = subsystems.reduce((acc, sub) => acc + (sub.isOn ? sub.power : 0), 0) + (data.loadPowerWatts || 0);
+    const totalEnergyWh = 85000 * (data.soc / 100); // 85kWh pack example
     
-    if (netPower <= 0) return "∞";
+    if (totalLoadPower <= 0) return "---";
     
-    const totalEnergyWh = 100 * 5 * 3.7 * (data.soc / 100);
-    const hoursRemaining = totalEnergyWh / netPower;
+    const hoursRemaining = totalEnergyWh / totalLoadPower;
+    const estKmh = (data.current * data.packVoltage / 200); // Rough estimate
+    const range = hoursRemaining * estKmh;
     
-    const h = Math.floor(hoursRemaining);
-    const m = Math.floor((hoursRemaining - h) * 60);
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+    return `${Math.round(range)} km`;
   };
 
   const projectionData = useMemo(() => {
     if (!data) return [];
     const points = [];
-    const totalLoadPower = appliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
-    const netPower = totalLoadPower - ((data.solarVoltage / 300) * 500);
-    const totalEnergyWh = 100 * 5 * 3.7 * (data.soc / 100);
+    const totalLoadPower = subsystems.reduce((acc, sub) => acc + (sub.isOn ? sub.power : 0), 0) + (data.loadPowerWatts || 0);
+    const totalEnergyWh = 85000 * (data.soc / 100);
     
-    for (let i = 0; i <= 12; i++) {
-      const projectedEnergy = Math.max(0, totalEnergyWh - (netPower * i));
-      const projectedSoc = (projectedEnergy / (100 * 5 * 3.7)) * 100;
-      points.push({
-        hour: `${i}h`,
-        soc: Number(projectedSoc.toFixed(1))
-      });
-      if (projectedSoc <= 0) break;
+    for (let i = 0; i <= 10; i++) {
+        const projectedEnergy = Math.max(0, totalEnergyWh - (totalLoadPower * i));
+        const projectedSoc = (projectedEnergy / 85000) * 100;
+        points.push({
+          hour: `${i}h`,
+          soc: Number(projectedSoc.toFixed(1))
+        });
+        if (projectedSoc <= 0) break;
     }
     return points;
-  }, [data, appliances]);
+  }, [data, subsystems]);
 
-  const ApplianceIcon = ({ type, isOn }: { type: string; isOn: boolean }) => {
-    const color = isOn ? 'text-yellow-400' : 'text-zinc-600';
+  const SubsystemIcon = ({ type, isOn }: { type: string; isOn: boolean }) => {
+    const color = isOn ? 'text-emerald-400' : 'text-zinc-600';
     switch (type) {
-      case 'light': return <Lightbulb className={`${color} w-5 h-5`} />;
       case 'fan': return <Fan className={`${color} w-5 h-5 ${isOn ? 'animate-spin' : ''}`} />;
       case 'tv': return <Tv className={`${color} w-5 h-5`} />;
-      case 'refrigerator': return <Refrigerator className={`${color} w-5 h-5`} />;
-      case 'washing_machine': return <WashingMachine className={`${color} w-5 h-5`} />;
-      default: return <Zap className={`${color} w-5 h-5`} />;
+      case 'cpu': return <Zap className={`${color} w-5 h-5`} />;
+      default: return <Power className={`${color} w-5 h-5`} />;
     }
   };
 
@@ -166,6 +175,25 @@ export const RemoteDashboard = ({ onBack }: { onBack: () => void }) => {
           </div>
           
           <div className="flex items-center gap-6 bg-zinc-900/50 border border-zinc-800 px-6 py-3 rounded-2xl">
+            {setSimulationSpeed && (
+              <div className="flex items-center gap-3 border-r border-zinc-800 pr-6 mr-6">
+                <Clock className="w-4 h-4 text-emerald-500" />
+                <div className="flex flex-col">
+                  <span className="text-[8px] uppercase text-zinc-500 font-mono tracking-widest">Sim Speed</span>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="range" 
+                      min="1" 
+                      max="100" 
+                      value={simulationSpeed} 
+                      onChange={(e) => setSimulationSpeed(parseInt(e.target.value))}
+                      className="w-24 accent-emerald-500 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <span className="text-xs font-mono font-bold text-emerald-400">{simulationSpeed}x</span>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="flex items-center gap-3">
               <Clock className="w-4 h-4 text-zinc-500" />
               <span className="text-xl font-mono font-bold text-white">
@@ -186,21 +214,21 @@ export const RemoteDashboard = ({ onBack }: { onBack: () => void }) => {
               <div>
                 <h2 className="text-xl font-bold text-white uppercase">CRITICAL SYSTEM ANOMALY</h2>
                 <p className="text-red-400 font-mono text-xs mt-1">
-                  {data.anomalyDetails.message} // {data.anomalyDetails.location}
+                  {data?.anomalyDetails?.message ?? "General Hardware Mismatch"} // {data?.anomalyDetails?.location ?? "Master Control Unit"}
                 </p>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
           <div className="bg-zinc-900/50 border border-zinc-800 p-8 rounded-3xl relative overflow-hidden">
             <div className="absolute top-0 left-0 w-1 h-full bg-yellow-500" />
             <div className="flex items-center justify-between mb-4">
               <span className="text-[10px] font-mono text-zinc-500 uppercase">Solar Voltage</span>
               <Sun className="w-5 h-5 text-yellow-500" />
             </div>
-            <div className="text-5xl font-bold">{data?.solarVoltage.toFixed(1)}V</div>
+            <div className="text-5xl font-bold">{(data?.solarVoltage ?? 0).toFixed(1)}V</div>
           </div>
 
           <div className="bg-zinc-900/50 border border-zinc-800 p-8 rounded-3xl relative overflow-hidden">
@@ -209,7 +237,7 @@ export const RemoteDashboard = ({ onBack }: { onBack: () => void }) => {
               <span className="text-[10px] font-mono text-zinc-500 uppercase">Pack Voltage</span>
               <Battery className="w-5 h-5 text-emerald-500" />
             </div>
-            <div className="text-5xl font-bold">{data?.packVoltage.toFixed(1)}V</div>
+            <div className="text-5xl font-bold">{(data?.packVoltage ?? 0).toFixed(1)}V</div>
             <div className="mt-4 flex items-center gap-2">
               <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
                 <div className="h-full bg-emerald-500" style={{ width: `${data?.soc}%` }} />
@@ -225,54 +253,64 @@ export const RemoteDashboard = ({ onBack }: { onBack: () => void }) => {
               <Zap className="w-5 h-5 text-orange-500" />
             </div>
             <div className="text-5xl font-bold">{Math.round(data?.loadPowerPercent || 0)}%</div>
-            <div className="text-[10px] font-mono text-zinc-500 mt-2">{data?.loadPowerWatts.toFixed(0)}W TOTAL DRAW</div>
+            <div className="text-[10px] font-mono text-zinc-500 mt-2">{(data?.loadPowerWatts ?? 0).toFixed(0)}W TOTAL DRAW</div>
+          </div>
+
+          <div className="bg-zinc-900/50 border border-zinc-800 p-8 rounded-3xl relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-1 h-full bg-purple-500" />
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-[10px] font-mono text-zinc-500 uppercase">Charge Cycles</span>
+              <RefreshCcw className="w-5 h-5 text-purple-500" />
+            </div>
+            <div className="text-5xl font-bold">{(chargeCycles ?? 0).toFixed(2)}</div>
+            <div className="text-[10px] font-mono text-zinc-500 mt-2 uppercase tracking-widest">Lifetime Total</div>
           </div>
 
           <div className="bg-zinc-900/50 border border-zinc-800 p-8 rounded-3xl relative overflow-hidden">
             <div className="absolute top-0 left-0 w-1 h-full bg-blue-500" />
             <div className="flex items-center justify-between mb-4">
-              <span className="text-[10px] font-mono text-zinc-500 uppercase">Est. Runtime</span>
+              <span className="text-[10px] font-mono text-zinc-500 uppercase">Est. Range</span>
               <Clock className="w-5 h-5 text-blue-500" />
             </div>
-            <div className="text-5xl font-bold">{calculateRuntime()}</div>
+            <div className="text-5xl font-bold tracking-tighter">{calculateRange()}</div>
             <div className="text-[10px] font-mono text-zinc-500 mt-2 uppercase tracking-widest">Until Depletion</div>
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Appliance Controls */}
+          {/* Subsystem Controls */}
           <div className="bg-zinc-900/50 border border-zinc-800 p-8 rounded-3xl">
             <div className="flex items-center justify-between mb-8">
               <div className="flex items-center gap-3">
                 <Power className="w-4 h-4 text-emerald-500" />
-                <h3 className="text-xs font-mono uppercase tracking-widest text-zinc-400">Appliance Controls</h3>
+                <h3 className="text-xs font-mono uppercase tracking-widest text-zinc-400">Subsystem Status</h3>
               </div>
               <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
-                {appliances.filter(a => a.isOn).length} Active
+                {(subsystems || []).filter(a => a.isOn).length} Active
               </div>
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {appliances.map((app) => (
+              {subsystems.map((sub) => (
                 <button
-                  key={app.id}
-                  onClick={() => toggleAppliance(app.id)}
+                  key={sub.id}
+                  onClick={() => toggleSubsystem(sub.id)}
                   className={`flex items-center justify-between p-5 rounded-2xl border transition-all duration-300 ${
-                    app.isOn 
+                    sub.isOn 
                       ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.1)]' 
                       : 'bg-zinc-950/50 border-zinc-800 text-zinc-500 hover:border-zinc-700'
                   }`}
                 >
                   <div className="flex items-center gap-4">
-                    <div className={`p-3 rounded-xl ${app.isOn ? 'bg-emerald-500/20' : 'bg-zinc-900'}`}>
-                      <ApplianceIcon type={app.type} isOn={app.isOn} />
+                    <div className={`p-3 rounded-xl ${sub.isOn ? 'bg-emerald-500/20' : 'bg-zinc-900'}`}>
+                      <SubsystemIcon type={sub.type} isOn={sub.isOn} />
                     </div>
                     <div className="flex flex-col items-start">
-                      <span className="text-xs font-bold uppercase tracking-tight">{app.name}</span>
-                      <span className="text-[10px] font-mono opacity-60">{app.power}W Distribution</span>
+                      <span className="text-xs font-bold uppercase tracking-tight">{sub.name}</span>
+                      <span className="text-[10px] font-mono opacity-60">{sub.power}W Consumption</span>
                     </div>
                   </div>
-                  <div className={`w-2 h-2 rounded-full ${app.isOn ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-800'}`} />
+                  <div className={`w-2 h-2 rounded-full ${sub.isOn ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-800'}`} />
                 </button>
               ))}
             </div>

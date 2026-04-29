@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from "react-router-dom";
-import { Battery, Thermometer, Zap, Activity, Save, Download, RefreshCcw, Settings2, X, Brain, AlertTriangle, CheckCircle2, Sun, Gauge, Power, ArrowRightLeft, ExternalLink, Volume2, VolumeX, Car, Globe, ShieldCheck, Database } from "lucide-react";
+import { Battery, Thermometer, Zap, Activity, Save, Download, RefreshCcw, Settings2, X, Brain, AlertTriangle, CheckCircle2, Sun, Gauge, Power, ArrowRightLeft, ExternalLink, Volume2, VolumeX, Car, Globe, ShieldCheck, Database, Monitor, Box, Cpu, User, MapPin, Wrench, Star, Phone, Navigation, Plus, Minus, History, Clock } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { GoogleGenAI, Type } from "@google/genai";
 
@@ -11,24 +11,44 @@ import * as THREE from "three";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 
 import { RemoteDashboard } from './components/RemoteDashboard';
-import { SmartHome, SmartHomeAppliance } from './components/SmartHome';
 import { PowerSankey } from './components/PowerSankey';
+import { AIAssistant } from './components/AIAssistant';
+import { ChargingController } from './components/ChargingController';
 
 interface BatteryCell {
-  id: number;
-  name: string;
+  id: string;
   voltage: number;
   current: number;
   temperature: number;
-  soh: number; // State of Health (%)
-  soc: number; // State of Charge (%)
+  soh: number; 
+  soc: number;
+  resistance: number; // mOhms
+  status: 'optimal' | 'warning' | 'critical';
+  isIsolated?: boolean;
+}
+
+interface BatteryModule {
+  id: string;
+  name: string;
+  cells: BatteryCell[];
+  avgVoltage: number;
+  avgTemp: number;
+  avgSoc: number;
+  avgHealth: number;
+  status: 'optimal' | 'warning' | 'critical';
+  isIsolated?: boolean;
 }
 
 interface AIAnalysis {
-  cells: BatteryCell[];
   alert: string;
   status: 'normal' | 'warning' | 'critical';
   recommendation: string;
+  servicePerson?: string;
+  serviceLocation?: string;
+  servicePersonRating?: number;
+  state?: any; 
+  badModuleIds?: string[];
+  badCellIds?: string[];
 }
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -38,19 +58,25 @@ const Battery3D = ({
   isSelected, 
   onSelect,
   isCharging,
+  throttle,
   isAiMonitoring,
-  isAnomaly
+  isAnomaly,
+  idx
 }: { 
   cell: BatteryCell; 
   isSelected: boolean; 
   onSelect: (cell: BatteryCell) => void;
   isCharging: boolean;
+  throttle: number;
   isAiMonitoring: boolean;
   isAnomaly?: boolean;
+  idx: number;
 }) => {
   const meshRef = useRef<THREE.Mesh>(null);
-  const glowRef = useRef<THREE.Mesh>(null);
+  const coreMaterialRef = useRef<THREE.MeshStandardMaterial>(null);
   const pulseRef = useRef<THREE.Mesh>(null);
+  const chargingGlowRef = useRef<THREE.Mesh>(null);
+  const dischargingGlowRef = useRef<THREE.Mesh>(null);
   const aiGlowRef = useRef<THREE.Mesh>(null);
   const anomalyGlowRef = useRef<THREE.Mesh>(null);
   
@@ -61,10 +87,32 @@ const Battery3D = ({
     if (meshRef.current) {
       meshRef.current.position.y = THREE.MathUtils.lerp(meshRef.current.position.y, targetY, 0.1);
     }
-    if (glowRef.current && isCharging) {
-      const scale = 1 + Math.sin(state.clock.elapsedTime * 4) * 0.05;
-      glowRef.current.scale.set(scale, scale, scale);
+    
+    // Animate core glow
+    if (coreMaterialRef.current) {
+        if (isCharging || throttle > 0) {
+            coreMaterialRef.current.emissiveIntensity = 3 + Math.sin(state.clock.elapsedTime * 6) * 2;
+        } else {
+             coreMaterialRef.current.emissiveIntensity = 1.5;
+        }
     }
+
+    // Animate rings
+    const animateRing = (ref: React.RefObject<THREE.Mesh | null>, active: boolean) => {
+      if (ref.current) {
+        ref.current.visible = active;
+        if (active) {
+          const s = 1 + Math.sin(state.clock.elapsedTime * 6) * 0.2;
+          ref.current.scale.set(s, s, 1);
+          if (ref.current.material instanceof THREE.MeshStandardMaterial) {
+            ref.current.material.opacity = 0.6 - (Math.sin(state.clock.elapsedTime * 6) + 1) * 0.2;
+          }
+        }
+      }
+    };
+    animateRing(chargingGlowRef, isCharging);
+    animateRing(dischargingGlowRef, throttle > 0 && !isCharging);
+
     if (aiGlowRef.current && isAiMonitoring) {
       const opacity = 0.1 + Math.sin(state.clock.elapsedTime * 2) * 0.1;
       if (aiGlowRef.current.material instanceof THREE.MeshStandardMaterial) {
@@ -87,15 +135,26 @@ const Battery3D = ({
     }
   });
 
-  // Blue color as per image
-  const color = "#1e40af"; // Deep blue
+  // Status-based colors
+  const coreColor = cell.isIsolated ? "#ef4444" : // Isolated is always red (safety trip)
+                    (cell.voltage > 4.0 || cell.voltage < 2.0) ? "#ef4444" : // True critical
+                    (cell.voltage > 3.95 || cell.voltage < 2.5) ? "#f97316" : // Warning
+                    (cell.voltage > 3.9 || cell.voltage < 3.0) ? "#eab308" : // Caution
+                    "#22c55e"; // Optimal (Includes 3.8V and up to 3.9V)
+  const shellColor = cell.isIsolated ? "#27272a" : (isSelected ? "#3b82f6" : "#18181b");
+  
+  const colCount = 10;
+  const rowCount = 50; 
+  const spacing = 0.5; // High-density grid
+  const xOffset = (colCount - 1) * spacing / 2;
+  const zOffset = (rowCount - 1) * spacing / 2;
 
   return (
     <group 
       position={[
-        (cell.id % 10) * 0.46 - 2.07, 
+        (idx % colCount) * spacing - xOffset, 
         0, 
-        Math.floor(cell.id / 10) * 0.46 - 2.07
+        Math.floor(idx / colCount) * spacing - zOffset
       ]}
     >
       <mesh
@@ -106,52 +165,63 @@ const Battery3D = ({
         }}
         castShadow
       >
-        {/* Taller, blue cylinder as per image */}
+        {/* Outer High-Tech Shell */}
         <cylinderGeometry args={[0.2, 0.2, 1.0, 32]} />
         <meshStandardMaterial 
-          color={color} 
-          metalness={0.6}
-          roughness={0.3}
+          color={shellColor} 
+          metalness={0.9}
+          roughness={0.1}
+          envMapIntensity={1}
         />
 
-        {/* Anomaly Pulse Glow */}
+        {/* Dynamic Energy Core */}
+        <mesh position={[0, 0, 0]}>
+          <cylinderGeometry args={[0.18, 0.18, 1.01, 32]} />
+          <meshStandardMaterial 
+            ref={coreMaterialRef}
+            color={isCharging ? "#22c55e" : (throttle > 0 ? "#eab308" : coreColor)}
+            emissive={isCharging ? "#22c55e" : (throttle > 0 ? "#eab308" : coreColor)}
+            transparent
+            opacity={0.85}
+          />
+        </mesh>
+
+        {/* Charging Pulse Ring */}
+        <mesh ref={chargingGlowRef} position={[0, -0.49, 0]} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+          <ringGeometry args={[0.2, 0.5, 32]} />
+          <meshStandardMaterial color="#22c55e" transparent opacity={0.5} emissive="#22c55e" emissiveIntensity={1} />
+        </mesh>
+
+        {/* Discharge Pulse Ring */}
+        <mesh ref={dischargingGlowRef} position={[0, -0.49, 0]} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+          <ringGeometry args={[0.2, 0.5, 32]} />
+          <meshStandardMaterial color="#eab308" transparent opacity={0.5} emissive="#eab308" emissiveIntensity={1} />
+        </mesh>
+
+        {/* Anomaly Pulse Overlay */}
         {isAnomaly && (
           <mesh ref={anomalyGlowRef}>
-            <cylinderGeometry args={[0.22, 0.22, 1.02, 32]} />
+            <cylinderGeometry args={[0.22, 0.22, 1.05, 32]} />
             <meshStandardMaterial 
               color="#ef4444" 
               transparent 
               opacity={0.4}
               emissive="#ef4444"
-              emissiveIntensity={1}
+              emissiveIntensity={2}
             />
           </mesh>
         )}
 
-        {/* Charging Glow */}
-        {isCharging && (
-          <mesh ref={glowRef}>
-            <cylinderGeometry args={[0.22, 0.22, 1.02, 32]} />
-            <meshStandardMaterial 
-              color="#fbbf24" 
-              transparent 
-              opacity={0.3}
-              emissive="#fbbf24"
-              emissiveIntensity={0.5}
-            />
-          </mesh>
-        )}
-
-        {/* AI Monitoring Scan Glow */}
+        {/* AI Diagnostics Beam Overlay */}
         {isAiMonitoring && (
           <mesh ref={aiGlowRef}>
-            <cylinderGeometry args={[0.23, 0.23, 1.05, 32]} />
+            <cylinderGeometry args={[0.23, 0.23, 1.08, 32]} />
             <meshStandardMaterial 
               color="#a855f7" 
               transparent 
               opacity={0.1}
               emissive="#a855f7"
-              emissiveIntensity={0.3}
+              emissiveIntensity={0.5}
             />
           </mesh>
         )}
@@ -182,7 +252,7 @@ const Battery3D = ({
                   </div>
                   <div className="text-left">
                     <div className="text-[10px] font-black text-white uppercase tracking-tighter">SOC</div>
-                    <div className="text-xl font-black text-emerald-400 leading-none">{cell.soc}%</div>
+                    <div className="text-xl font-black text-emerald-400 leading-none">{cell?.soc ?? 0}%</div>
                   </div>
                 </motion.div>
 
@@ -208,7 +278,7 @@ const Battery3D = ({
                   </div>
                   <div className="text-left">
                     <div className="text-[10px] font-black text-white uppercase tracking-tighter">SOH</div>
-                    <div className="text-xl font-black text-blue-400 leading-none">{cell.soh}%</div>
+                    <div className="text-xl font-black text-blue-400 leading-none">{cell?.soh ?? 0}%</div>
                   </div>
                 </motion.div>
 
@@ -227,7 +297,7 @@ const Battery3D = ({
                   </div>
                   <div className="text-left">
                     <div className="text-[10px] font-black text-white uppercase tracking-tighter">VOLT</div>
-                    <div className="text-xl font-black text-blue-400 leading-none">{cell.voltage.toFixed(2)}V</div>
+                    <div className="text-xl font-black text-blue-400 leading-none">{(cell?.voltage ?? 0).toFixed(2)}V</div>
                   </div>
                 </motion.div>
 
@@ -246,7 +316,7 @@ const Battery3D = ({
                   </div>
                   <div className="text-left">
                     <div className="text-[10px] font-black text-white uppercase tracking-tighter">CURRENT</div>
-                    <div className="text-xl font-black text-blue-400 leading-none">{cell.current.toFixed(1)}A</div>
+                    <div className="text-xl font-black text-blue-400 leading-none">{(cell?.current ?? 0).toFixed(1)}A</div>
                   </div>
                 </motion.div>
 
@@ -265,7 +335,7 @@ const Battery3D = ({
                   </div>
                   <div className="text-left">
                     <div className="text-[10px] font-black text-white uppercase tracking-tighter">TEMP</div>
-                    <div className={`text-xl font-black leading-none ${cell.temperature > 50 ? 'text-red-400' : 'text-blue-400'}`}>{cell.temperature.toFixed(1)}°C</div>
+                    <div className={`text-xl font-black leading-none ${(cell?.temperature ?? 0) > 50 ? 'text-red-400' : 'text-blue-400'}`}>{(cell?.temperature ?? 0).toFixed(1)}°C</div>
                   </div>
                 </motion.div>
               </div>
@@ -295,9 +365,9 @@ const Battery3D = ({
         </mesh>
 
         {/* Busbars (Copper Connectors) as per image - Zig-zag pattern */}
-        {cell.id % 10 < 9 && (
-          <mesh position={[0.23, 0.53, 0]} rotation={[0, 0, 0]}>
-            <boxGeometry args={[0.46, 0.02, 0.08]} />
+        {(idx % 10 < 9) && (
+          <mesh position={[spacing/2, 0.53, 0]} rotation={[0, 0, 0]}>
+            <boxGeometry args={[spacing, 0.02, 0.08]} />
             <meshStandardMaterial color="#b45309" metalness={0.8} roughness={0.2} />
           </mesh>
         )}
@@ -314,7 +384,8 @@ const BatteryStack3D = ({
   isAiMonitoring,
   aiCells = [],
   aiAnalysis = null,
-  isCharging = false
+  isCharging = false,
+  throttle = 0
 }: { 
   cells: BatteryCell[]; 
   selectedCell: BatteryCell | null; 
@@ -324,6 +395,7 @@ const BatteryStack3D = ({
   aiCells?: BatteryCell[];
   aiAnalysis?: AIAnalysis | null;
   isCharging?: boolean;
+  throttle?: number;
 }) => {
   const envPreset = timeOfDay === 'night' ? 'night' : timeOfDay === 'noon' ? 'city' : 'sunset';
   
@@ -331,11 +403,19 @@ const BatteryStack3D = ({
   const isCritical = aiAnalysis?.status === 'critical';
   
   return (
-    <div className={`w-full h-[600px] bg-zinc-950 rounded-3xl overflow-hidden border transition-all duration-500 relative shadow-inner cursor-default ${isCritical ? 'border-red-500 shadow-[0_0_50px_rgba(239,68,68,0.2)]' : 'border-zinc-800'}`}>
-      <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
-        <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-zinc-500 bg-black/50 px-2 py-1 rounded backdrop-blur-sm border border-zinc-800">
-          3D Precision Stack • Click to Inspect
-        </div>
+          <div className={`relative w-full h-[800px] bg-zinc-950 rounded-[3rem] overflow-hidden border transition-all duration-500 relative shadow-2xl cursor-default ${isCritical ? 'border-red-500 shadow-[0_0_80px_rgba(239,68,68,0.3)]' : 'border-zinc-800/80 shadow-inner'}`}>
+            {/* Tech HUD Decals */}
+            <div className="absolute inset-0 pointer-events-none border-[20px] border-transparent">
+              <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-zinc-700 rounded-tl-xl" />
+              <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-zinc-700 rounded-tr-xl" />
+              <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-zinc-700 rounded-bl-xl" />
+              <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-zinc-700 rounded-br-xl" />
+              
+              {/* Scanlines Effect */}
+              <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.1)_50%),linear-gradient(90deg,rgba(255,0,0,0.03),rgba(0,255,0,0.01),rgba(0,0,255,0.03))] bg-[length:100%_4px,3px_100%] opacity-20" />
+            </div>
+            
+            <div className="absolute top-6 left-6 z-10 flex flex-col gap-3">
         {isAiMonitoring && (
           <div className={`flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.2em] px-2 py-1 rounded backdrop-blur-sm border animate-pulse ${isCritical ? 'text-red-400 bg-red-500/10 border-red-500/30' : 'text-purple-400 bg-purple-500/10 border-purple-500/30'}`}>
             <Brain className="w-3 h-3" />
@@ -360,15 +440,18 @@ const BatteryStack3D = ({
         <pointLight position={[-10, 10, -10]} intensity={1} color={isCritical ? "#ef4444" : "#ffffff"} />
         
         <group position={[0, -0.2, 0]}>
-          {cells.map((cell) => (
+          <gridHelper args={[20, 20, "#1e1b4b", "#111827"]} position={[0, -0.5, 0]} />
+          {cells.map((cell, idx) => cell && (
             <Battery3D 
               key={cell.id} 
               cell={cell} 
               isSelected={selectedCell?.id === cell.id}
               onSelect={onSelect}
               isCharging={isCharging}
+              throttle={throttle}
               isAiMonitoring={isAiMonitoring}
-              isAnomaly={aiCells.some(c => c.id === cell.id) && aiAnalysis?.status !== 'normal'}
+              isAnomaly={aiCells.some(c => c?.id === cell.id) && aiAnalysis?.status !== 'normal'}
+              idx={idx}
             />
           ))}
           
@@ -386,9 +469,93 @@ const BatteryStack3D = ({
   );
 };
 
+const serviceStations = [
+  { id: 'ss1', name: 'Tesla Certified Service Center', rating: 4.9, distance: '2.4 km', type: 'Expert Repair', lat: 0.1, lng: 0.2, status: 'Open' },
+  { id: 'ss2', name: 'NexGen Battery Lab', rating: 4.7, distance: '5.1 km', type: 'Specialist', lat: -0.2, lng: 0.5, status: 'Closing Soon' },
+  { id: 'ss3', name: 'ChargePoint Pro Hub', rating: 4.8, distance: '1.2 km', type: 'Level 3 Charging', lat: 0.3, lng: -0.1, status: 'Open 24/7' },
+];
+
+const experts = [
+  { id: 'ex1', name: 'Dr. Sarah Watts', role: 'Lithium Chemist', rating: 5.0, distance: 'Online', phone: '+1-555-0123' },
+  { id: 'ex2', name: 'Marcus Chen', role: 'BMS Engineer', rating: 4.9, distance: 'In Person - 4km', phone: '+1-555-0199' },
+];
+
+const MotorGraphic = ({ rpm, label }: { rpm: number, label: string }) => {
+  const visualRpm = rpm / 5;
+  const rotationDuration = visualRpm > 0 ? 60 / visualRpm : 0;
+  
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="relative w-28 h-28 flex items-center justify-center bg-zinc-950 rounded-3xl border border-zinc-800 shadow-[inset_0_0_20px_rgba(0,0,0,0.8)] overflow-hidden">
+        {/* Background Grid */}
+        <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'linear-gradient(90deg, #18181b 1px, transparent 1px), linear-gradient(#18181b 1px, transparent 1px)', backgroundSize: '10px 10px' }} />
+        
+        {/* Core Heat Glow */}
+        <motion.div 
+          animate={rpm > 0 ? {
+            opacity: [0.1, 0.4, 0.1],
+            scale: [0.8, 1.2, 0.8]
+          } : { opacity: 0 }}
+          className={`absolute inset-4 rounded-full blur-2xl pointer-events-none ${rpm > 12000 ? 'bg-orange-500' : rpm > 6000 ? 'bg-blue-500' : 'bg-blue-800'}`}
+        />
+
+        {/* Stator Windings */}
+        {[0, 60, 120, 180, 240, 300].map((deg, i) => (
+          <motion.div
+            key={deg}
+            animate={rpm > 0 ? {
+              backgroundColor: rpm > 12000 ? ['#444', '#f97316', '#444'] : ['#444', '#3b82f6', '#444'],
+            } : { backgroundColor: '#27272a' }}
+            transition={{
+              duration: Math.max(0.1, 1000 / (rpm + 1)),
+              repeat: Infinity,
+              delay: i * 0.02
+            }}
+            className="absolute w-2 h-6 rounded-sm shadow-[0_0_10px_rgba(59,130,246,0.3)]"
+            style={{ transform: `rotate(${deg}deg) translateY(-40px)` }}
+          />
+        ))}
+
+        {/* Rotor Assembly */}
+        <motion.div
+          animate={rpm > 0 ? { rotate: 360 } : {}}
+          transition={rpm > 0 ? { duration: rotationDuration, repeat: Infinity, ease: "linear" } : {}}
+          className="relative w-14 h-14"
+        >
+          {/* Main Rotor Body */}
+          <div className="absolute inset-0 rounded-full bg-zinc-900 border-2 border-zinc-700 shadow-xl flex items-center justify-center overflow-hidden">
+             <div className="absolute w-full h-0.5 bg-zinc-800" />
+             <div className="absolute w-0.5 h-full bg-zinc-800" />
+             {/* Magnetic Poles */}
+             <div className="absolute top-0 w-4 h-2 bg-zinc-600 rounded-b-sm" />
+             <div className="absolute bottom-0 w-4 h-2 bg-zinc-600 rounded-t-sm" />
+             <div className="absolute left-0 h-4 w-2 bg-zinc-600 rounded-r-sm" />
+             <div className="absolute right-0 h-4 w-2 bg-zinc-600 rounded-l-sm" />
+          </div>
+
+          {/* Central Shaft */}
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center shadow-lg">
+            <div className="w-2 h-2 rounded-full bg-zinc-400" />
+          </div>
+        </motion.div>
+
+        {/* Magnetic Vortex Lines */}
+        {rpm > 2000 && (
+          <motion.div 
+            animate={{ rotate: -360 }}
+            transition={{ duration: rotationDuration * 2, repeat: Infinity, ease: "linear" }}
+            className="absolute inset-2 border border-blue-500/10 rounded-full border-dashed"
+          />
+        )}
+      </div>
+      <div className="text-[10px] font-black text-zinc-600 tracking-tighter uppercase">{label}</div>
+    </div>
+  );
+};
+
 export default function App() {
-  const [cells, setCells] = useState<BatteryCell[]>([]);
-  const [aiCells, setAiCells] = useState<BatteryCell[]>([]);
+  const [modules, setModules] = useState<BatteryModule[]>([]);
+  const [selectedModule, setSelectedModule] = useState<BatteryModule | null>(null);
   const [selectedCell, setSelectedCell] = useState<BatteryCell | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -397,32 +564,52 @@ export default function App() {
   const [lastSyncStatus, setLastSyncStatus] = useState<{ time: string; success: boolean } | null>(null);
   const [show3D, setShow3D] = useState(false);
   const [timeOfDay, setTimeOfDay] = useState<'dawn' | 'noon' | 'evening' | 'night'>('noon');
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [activeView, setActiveView] = useState<'grid' | 'distribution' | 'smarthome' | 'schematic'>('grid');
+  const [activeView, setActiveView] = useState<'grid' | 'distribution' | 'architecture' | 'schematic' | 'support'>('grid');
+
+  // AI State
+  const [isAiMonitoring, setIsAiMonitoring] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
+  const [aiLanguage, setAiLanguage] = useState<'en' | 'hi' | 'ta' | 'ml'>('en');
+  const [analysisHistory, setAnalysisHistory] = useState<AIAnalysis[]>([]);
+  const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiRetryIn, setAiRetryIn] = useState<number>(0);
+  const [isMuted, setIsMuted] = useState(false);
+  const lastAiAnalysisTime = useRef<number>(0);
+  const aiCooldownRef = useRef<number>(120000); // 120s base interval to preserve quota
+
+  // AI Monitor Timer and Cooldown logic
+  useEffect(() => {
+    let timerInterval: NodeJS.Timeout;
+    if (isAiMonitoring && aiRetryIn > 0) {
+      timerInterval = setInterval(() => {
+        setAiRetryIn(prev => Math.max(0, prev - 1));
+      }, 1000);
+    }
+    return () => clearInterval(timerInterval);
+  }, [isAiMonitoring, aiRetryIn]);
+  const prevStatusRef = useRef<'normal' | 'warning' | 'critical' | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const oscillatorRef = useRef<OscillatorNode | null>(null);
+
+  const [chargeCycles, setChargeCycles] = useState(0);
+  const [simulationSpeed, setSimulationSpeed] = useState(1);
   const [globalTargetTemp, setGlobalTargetTemp] = useState(25);
   const [capacityHistory, setCapacityHistory] = useState<{ time: string; soc: number }[]>([]);
   const [showRuntimeGraph, setShowRuntimeGraph] = useState(false);
+  const [evChargingInput, setEvChargingInput] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [powerSource, setPowerSource] = useState<'battery' | 'evCharging'>('battery');
+  const [aiCells, setAiCells] = useState<BatteryCell[]>([]);
+  const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
 
-  // Power & Load State
-  const [solarVoltage, setSolarVoltage] = useState(300);
-  const [powerSource, setPowerSource] = useState<'battery' | 'solar'>('battery');
+  // Simulation Logic derived state
+  const cells = (modules || []).flatMap(m => m?.cells || []);
 
-  const [smartHomeAppliances, setSmartHomeAppliances] = useState<SmartHomeAppliance[]>([
-    { id: 'l1', name: 'Living Room Light', type: 'light', power: 45, isOn: false, x: 35, y: 64 },
-    { id: 'l8', name: 'Light 8 (Living Room)', type: 'light', power: 30, isOn: false, x: 12, y: 64 },
-    { id: 'tv1', name: 'Smart TV', type: 'tv', power: 180, isOn: false, x: 5, y: 80 },
-    { id: 'ac1', name: 'Master Bedroom AC', type: 'air_conditioner', power: 1600, isOn: false, x: 85, y: 35 },
-    { id: 'l9', name: 'Light 9 (Master Bed)', type: 'light', power: 30, isOn: false, x: 60, y: 35 },
-    { id: 'ref1', name: 'Smart Refrigerator', type: 'refrigerator', power: 220, isOn: true, x: 65, y: 85 },
-    { id: 'l2', name: 'Kitchen Task Light', type: 'light', power: 30, isOn: true, x: 75, y: 64 },
-    { id: 'wm1', name: 'Washing Machine', type: 'washing_machine', power: 600, isOn: false, x: 55, y: 85 },
-    { id: 'f1', name: 'Living Room Fan', type: 'fan', power: 85, isOn: false, x: 18, y: 64 },
-    { id: 'f3', name: 'Study Desk Lamp', type: 'light', power: 25, isOn: false, x: 15, y: 55 },
-    { id: 'l3', name: 'Loft Ambient Light', type: 'light', power: 40, isOn: false, x: 35, y: 35 },
-    { id: 'l4', name: 'Master Bedside Lamp', type: 'light', power: 25, isOn: false, x: 75, y: 56 },
-    { id: 'ev1', name: 'Garage EV Charger', type: 'ev_charger', power: 7200, isOn: false, x: 9, y: 55 },
-    { id: 'gw1', name: 'Utility Grid Gateway', type: 'grid_gateway', power: 20, isOn: true, x: 95, y: 8 },
-  ]);
+  // Power & Motor State
+  const [motorRpm, setMotorRpm] = useState(0);
+  const [throttle, setThrottle] = useState(0);
+  const [regenerativeBraking, setRegenerativeBraking] = useState(0);
 
   // Smart Grid & Professional Research States
   const [gridMode, setGridMode] = useState<'standby' | 'peak_shaving' | 'frequency_regulation'>('standby');
@@ -430,61 +617,45 @@ export default function App() {
   const [isDemandResponseActive, setIsDemandResponseActive] = useState(false);
   const [gridFrequency, setGridFrequency] = useState(60.0);
 
-  const totalLoadPower = smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
-  const solarChargingPower = solarVoltage > 0 ? ((solarVoltage / 300) * 500) : 0;
+  const evChargingPowerInput = evChargingInput; 
+  const totalLoadPower = (motorRpm / 15000) * 150000; // Power consumption of motor (W)
   
   // Grid Power Calculation for research/paper context
   const getGridPower = () => {
     if (gridMode === 'frequency_regulation') {
-      // Balance grid frequency: if freq < 60, export from battery. If freq > 60, import to battery.
       const diff = 60 - gridFrequency;
-      return diff * 5000; // Large swing for visual effect
+      return diff * 5000;
     }
-    if (gridMode === 'peak_shaving' && solarChargingPower > totalLoadPower) {
-      return solarChargingPower - totalLoadPower; // Export excess solar
+    if (gridMode === 'peak_shaving' && evChargingPowerInput > totalLoadPower) {
+      return evChargingPowerInput - totalLoadPower; // Export excess charging power
     }
-    if (isDemandResponseActive) return 1500; // Fixed export during DR event
+    if (isDemandResponseActive) return 1500;
     return 0;
   };
   const gridPower = getGridPower();
 
-  // Runtime Estimation
-  const calculateRuntime = () => {
-    const totalLoadPower = smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
-    
-    const solarChargingPower = solarVoltage > 0 ? ((solarVoltage / 300) * 500) : 0;
-    
-    const netPower = totalLoadPower - solarChargingPower;
-    
-    if (netPower <= 0) return "Charging";
-    
-    // Assume 5Ah capacity per cell
-    const totalEnergyWh = cells.reduce((acc, cell) => acc + (5 * cell.voltage * (cell.soc / 100)), 0);
-    const hours = totalEnergyWh / netPower;
-    
-    if (hours > 24) return "> 24h";
-    const mins = Math.round((hours % 1) * 60);
-    return `${Math.floor(hours)}h ${mins}m`;
+  const calculateRange = () => {
+    // 100 Wh/km average efficiency for efficient EV
+    const throttleFactor = Math.max(1, throttle / 20);
+    const totalEnergyWh = (modules || []).reduce((acc, mod) => acc + ((mod.cells?.length || 0) * 5 * 3.7 * (mod.avgSoc / 100)), 0);
+    const rangeKm = totalEnergyWh / (100 * throttleFactor);
+    return Math.round(rangeKm);
   };
 
-  const getRuntimeProjectionData = () => {
-    const totalLoadPower = smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
+  const getRangeProjectionData = () => {
+    const totalEnergyWh = (modules || []).reduce((acc, mod) => acc + ((mod.cells?.length || 0) * 5 * 3.7 * (mod.avgSoc / 100)), 0);
+    const throttleFactor = Math.max(1, throttle / 20);
+    const hourlyConsumption = 10000 * throttleFactor; // Simplified 10kW draw
 
-    const solarChargingPower = solarVoltage > 0 ? ((solarVoltage / 300) * 500) : 0;
-    const netPower = totalLoadPower - solarChargingPower;
-    
-    const currentSoc = cells.reduce((acc, c) => acc + c.soc, 0) / cells.length;
-    const totalEnergyWh = cells.reduce((acc, cell) => acc + (5 * cell.voltage * (cell.soc / 100)), 0);
-    
     const data = [];
-    for (let i = 0; i <= 12; i++) {
-      const projectedEnergy = Math.max(0, totalEnergyWh - (netPower * i));
-      const projectedSoc = (projectedEnergy / (cells.length * 5 * 3.7)) * 100;
-      data.push({
-        hour: `${i}h`,
-        soc: Number(projectedSoc.toFixed(1))
-      });
-      if (projectedSoc <= 0) break;
+    for (let i = 0; i <= 10; i++) {
+        const projectedEnergy = Math.max(0, totalEnergyWh - (hourlyConsumption * i));
+        const projectedSoc = (projectedEnergy / (50 * 10 * 3.7 * 0.5)) * 100; // Adjusted for 50 modules x 10 cells (Assuming 3.7V, 0.5Wh each cell for simple calc)
+        data.push({
+            hour: `${i * 10}m`,
+            soc: Number(projectedSoc.toFixed(1))
+        });
+        if (projectedSoc <= 0) break;
     }
     return data;
   };
@@ -510,67 +681,92 @@ export default function App() {
     }
   };
 
-  // Solar voltage logic based on time of day
+  // EV Charging input logic based on time of day
   useEffect(() => {
-    const solarMap = {
+    const chargeMap = {
       dawn: 120,
       noon: 300,
       evening: 80,
       night: 0
     };
-    setSolarVoltage(solarMap[timeOfDay]);
+    setEvChargingInput(chargeMap[timeOfDay]);
   }, [timeOfDay]);
   
-  const toggleAppliance = async (id: string) => {
-    const updated = smartHomeAppliances.map(app => 
-      app.id === id ? { ...app, isOn: !app.isOn } : app
-    );
-    setSmartHomeAppliances(updated);
-    
-    // Sync to server
+  const fetchBatteryData = async () => {
+    setLoading(true);
     try {
-      await fetch("/api/appliances", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updated),
-      });
+      const res = await fetch("/api/battery-pack");
+      if (res.ok) {
+        const rawCells: any[] = await res.json();
+        if (rawCells && Array.isArray(rawCells) && rawCells.length > 0) {
+          // Re-module-ize the flat cells (50 modules x 50 cells)
+          const newModules: BatteryModule[] = [];
+          const cellsToProcess = rawCells.slice(0, 2500).map(c => ({
+            ...c,
+            id: String(c.id)
+          })) as BatteryCell[];
+          for (let i = 0; i < 50; i++) {
+            const moduleCells = cellsToProcess.slice(i * 50, (i + 1) * 50);
+            if (moduleCells.length === 0) break;
+            const avgSoc = moduleCells.reduce((acc, c) => acc + c.soc, 0) / (moduleCells.length || 1);
+            const avgTemp = moduleCells.reduce((acc, c) => acc + c.temperature, 0) / (moduleCells.length || 1);
+            const avgVolt = moduleCells.reduce((acc, c) => acc + c.voltage, 0) / (moduleCells.length || 1);
+            const avgHealth = moduleCells.reduce((acc, c) => acc + c.soh, 0) / (moduleCells.length || 1);
+
+            newModules.push({
+              id: `mod-${i}`,
+              name: `Pack ${i + 1}`,
+              cells: moduleCells,
+              avgSoc,
+              avgTemp,
+              avgVoltage: avgVolt,
+              avgHealth,
+              status: (avgTemp > 45 || avgVolt > 4.1) ? 'warning' : 'optimal'
+            });
+          }
+          setModules(newModules);
+          return;
+        }
+      }
+      generateInitialModules();
     } catch (e) {
-      console.error("Failed to sync appliances:", e);
+      generateInitialModules();
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Poll for appliance updates from remote
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch("/api/appliances");
-        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-        const contentType = res.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) {
-          throw new TypeError("Oops, we haven't got JSON!");
-        }
-        const data = await res.json();
-        setSmartHomeAppliances(data);
-      } catch (e) {
-        console.error("Failed to poll appliances:", e);
-      }
-    }, 2000);
-    return () => clearInterval(interval);
-  }, []);
+  const generateInitialModules = () => {
+    const initialModules: BatteryModule[] = Array.from({ length: 50 }).map((_, i) => ({
+      id: `mod-${i}`,
+      name: `Pack ${i + 1}`,
+      status: 'optimal',
+      avgVoltage: 3.7,
+      avgSoc: 100,
+      avgTemp: 25,
+      avgHealth: 100,
+      cells: Array.from({ length: 50 }).map((_, j) => ({
+        id: `cell-${i}-${j}`,
+        voltage: 3.7,
+        soc: 100,
+        temperature: 25,
+        status: 'optimal',
+        soh: 100,
+        current: 0,
+        resistance: 15 + Math.random() * 5
+      }))
+    }));
+    setModules(initialModules);
+    setLoading(false);
+  };
 
-  // AI State
-  const [isAiMonitoring, setIsAiMonitoring] = useState(false);
-  const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
-  const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const lastAiAnalysisTime = useRef<number>(0);
-  const prevStatusRef = useRef<'normal' | 'warning' | 'critical' | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const oscillatorRef = useRef<OscillatorNode | null>(null);
+  useEffect(() => {
+    fetchBatteryData();
+  }, []);
 
   // Sound Alert Effect
   useEffect(() => {
-    // Handle Continuous Anomaly Beep (High Pitch)
+    let soundInterval: NodeJS.Timeout;
     const hasAnomaly = aiAnalysis && (aiAnalysis.status === 'critical' || aiAnalysis.status === 'warning');
     
     if (isAiMonitoring && hasAnomaly && !isMuted) {
@@ -578,45 +774,48 @@ export default function App() {
         try {
           const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
           audioCtxRef.current = new AudioContextClass();
-          const gainNode = audioCtxRef.current.createGain();
-          oscillatorRef.current = audioCtxRef.current.createOscillator();
-
-          oscillatorRef.current.type = 'sine';
-          oscillatorRef.current.frequency.setValueAtTime(1200, audioCtxRef.current.currentTime);
-          gainNode.gain.setValueAtTime(0.05, audioCtxRef.current.currentTime);
-
-          oscillatorRef.current.connect(gainNode);
-          gainNode.connect(audioCtxRef.current.destination);
-          oscillatorRef.current.start();
         } catch (e) {
           console.error("AudioContext failed:", e);
         }
       }
-    } else {
-      if (oscillatorRef.current) {
-        try {
-          oscillatorRef.current.stop();
-        } catch (e) {}
-        oscillatorRef.current = null;
-      }
+
       if (audioCtxRef.current) {
-        try {
-          audioCtxRef.current.close();
-        } catch (e) {}
-        audioCtxRef.current = null;
+        const audioCtx = audioCtxRef.current;
+        const playBeep = () => {
+          if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+          }
+          
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
+          
+          gain.gain.setValueAtTime(0, audioCtx.currentTime);
+          gain.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 0.05);
+          gain.gain.setValueAtTime(0.08, audioCtx.currentTime + 0.95);
+          gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.0);
+          
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          
+          osc.start();
+          osc.stop(audioCtx.currentTime + 1.1);
+        };
+
+        playBeep(); // Start immediate
+        soundInterval = setInterval(playBeep, 2000); // 1s beep + 1s delay = 2s cycle
       }
     }
 
-    // Handle Status Change One-shot Alerts
+    // Handle Status Change One-shot Alerts (kept for context changes)
     if (isAiMonitoring && aiAnalysis && !isMuted) {
       if (aiAnalysis.status !== prevStatusRef.current) {
+        // Critical status entry sound
         if (aiAnalysis.status === 'critical') {
           const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3');
           audio.volume = 0.4;
-          audio.play().catch(() => {});
-        } else if (aiAnalysis.status === 'warning') {
-          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-          audio.volume = 0.3;
           audio.play().catch(() => {});
         }
         prevStatusRef.current = aiAnalysis.status;
@@ -624,364 +823,229 @@ export default function App() {
     } else if (!isAiMonitoring || !aiAnalysis) {
       prevStatusRef.current = null;
     }
+
+    return () => {
+      if (soundInterval) clearInterval(soundInterval);
+    };
   }, [aiAnalysis, isAiMonitoring, isMuted]);
 
   useEffect(() => {
-    fetchCells();
-  }, []);
-
-  // Simulation Loop (Charge / Discharge)
-  useEffect(() => {
     const interval = setInterval(() => {
-      const totalBatteryVoltage = cells.reduce((acc, cell) => acc + cell.voltage, 0);
-      const isBatteryFull = cells.every(c => c.voltage >= 4.19);
-      const isBatteryLow = totalBatteryVoltage < 240;
-      
-      const smartHomePower = smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
-      const totalLoadCurrent = smartHomePower / (totalBatteryVoltage || 296);
-      
-      // Solar Charging Current (Simulated)
-      const solarPower = solarVoltage > 0 ? ((solarVoltage / 300) * 500) : 0;
-      const solarChargeCurrent = solarPower / (totalBatteryVoltage || 370); // Max 500W charge
-      
-      // Advanced Switching Logic
-      let nextPowerSource: 'battery' | 'solar' = 'battery';
+      // Logic for motor RPM following throttle
+      const targetRpm = (throttle / 100) * 16000;
+      setMotorRpm(prev => prev + (targetRpm - prev) * 0.1);
 
-      // EMERGENCY OVERRIDE: If AI detects anomaly, force solar and shutdown battery
-      const isEmergency = aiAnalysis?.status === 'critical' || aiAnalysis?.status === 'warning';
-      const isCritical = aiAnalysis?.status === 'critical';
-      
-      if (isEmergency) {
-        nextPowerSource = 'solar';
-        
-        // Load Shedding: If solar is not enough, turn off non-essential appliances
-        const currentLoad = smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
-        if (solarPower < currentLoad) {
-          // Priority list for shutdown: AC -> Fans -> Lights
-          const priorityOrder = ['air_conditioner', 'fan', 'tv', 'washing_machine', 'light'];
-          let loadToShed = currentLoad - solarPower;
-          let updatedAppliances = [...smartHomeAppliances];
-          let changed = false;
-
-          for (const type of priorityOrder) {
-            for (let i = 0; i < updatedAppliances.length; i++) {
-              if (updatedAppliances[i].isOn && updatedAppliances[i].type === type) {
-                updatedAppliances[i] = { ...updatedAppliances[i], isOn: false };
-                loadToShed -= updatedAppliances[i].power;
-                changed = true;
-                if (loadToShed <= 0) break;
-              }
-            }
-            if (loadToShed <= 0) break;
-          }
-
-          if (changed) {
-            setSmartHomeAppliances(updatedAppliances);
-            // Sync to server
-            fetch("/api/appliances", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(updatedAppliances),
-            }).catch(e => console.error("Emergency sync failed:", e));
-          }
-        }
-      } else {
-        if (solarVoltage >= 300) {
-          nextPowerSource = 'solar';
-        } else if (isBatteryLow && solarVoltage > 240) {
-          nextPowerSource = 'solar';
-        } else if (solarVoltage < 240) {
-          nextPowerSource = 'battery';
-        } else if (isBatteryFull) {
-          nextPowerSource = 'battery';
-        } else if (solarVoltage > totalBatteryVoltage + 5) {
-          nextPowerSource = 'solar';
-        }
-      }
-
-      setPowerSource(nextPowerSource);
-
-      setCells(prevCells => {
-        const newCells = prevCells.map(cell => {
-          let newVoltage = cell.voltage;
-          let newTemp = cell.temperature;
-          let newSoc = cell.soc;
-          let newSoh = cell.soh;
-
-          // Simultaneous Charge/Discharge Logic
-          // Cut off battery completely if critical
-          const chargeRate = (!isBatteryFull && !isCritical) ? (solarChargeCurrent / 100) : 0;
-          const dischargeRate = (nextPowerSource === 'battery' && !isCritical) ? (totalLoadCurrent / 100) : 0;
-          const netRate = chargeRate - dischargeRate;
-
-          // Update SOC and Voltage based on net rate
-          if (netRate > 0) {
-            // Net Charging
-            newVoltage = Math.min(4.2, cell.voltage + (netRate * 0.01));
-            newSoc = Math.min(100, cell.soc + (netRate * 0.5));
-          } else if (netRate < 0) {
-            // Net Discharging
-            newVoltage = Math.max(2.5, cell.voltage + (netRate * 0.01));
-            newSoc = Math.max(0, cell.soc + (netRate * 0.5));
-          }
-
-          // Temperature Simulation with Global Control
-          // Natural cooling/heating towards target
-          const tempDiff = globalTargetTemp - cell.temperature;
-          newTemp += tempDiff * 0.05; // Approach target temp
-
-          // Load heating
-          if (dischargeRate > 0) {
-            newTemp += (dischargeRate * 5);
-          }
+      setModules(prevModules => {
+        return prevModules.map(mod => {
+          // Adjust power factors by simulation speed
+          const speedFactor = simulationSpeed;
+          const energyDraw = ((motorRpm / 16000) * (throttle / 100) * 0.2) * speedFactor;
+          const regenGain = ((regenerativeBraking / 100) * 0.05) * speedFactor;
+          const chargeFromCharging = evChargingInput > 0 ? (evChargingInput / 1000 * 0.5) * speedFactor : 0;
           
-          // Solar charging heating (slight)
-          if (chargeRate > 0) {
-            newTemp += (chargeRate * 1);
-          }
+          const netSocChange = chargeFromCharging + regenGain - energyDraw;
+          
+          const newCells = (mod.cells || []).map(cell => {
+            const tempChange = ((energyDraw * 1.5) + ((globalTargetTemp - cell.temperature) * 0.02)) * speedFactor;
+            const currentSoc = Math.max(0, Math.min(100, cell.soc + netSocChange));
+            
+            // Refined Voltage Curve (1.8V to 3.8V range)
+            // Near 100% -> 3.75V+ 
+            // Near 50% -> ~2.8V
+            // Near 20% -> ~2.2V 
+            // Near 5% -> < 2V (Power Critical)
+            // USER REQUEST: Max Safe Voltage = 3.8V (Normal peak SoC)
+            const calculatedVoltage = 1.8 + (currentSoc / 100) * 2.0;
+            
+            let cellIsIsolated = cell.isIsolated;
+            // Trip isolator only if it goes beyond the specified safe peak (3.8V) into danger territory (e.g. 4.1V)
+            if (calculatedVoltage >= 4.1 || cell.temperature >= 75) {
+                cellIsIsolated = true;
+            }
 
-          // Degrade SOH slightly during high temp/load
-          if (newTemp > 60 || totalLoadCurrent > 3) {
-            newSoh = Math.max(0, cell.soh - 0.0001);
-          }
+            const cellStatus: 'optimal' | 'warning' | 'critical' = 
+                               (cellIsIsolated || calculatedVoltage >= 4.0 || calculatedVoltage < 2.0 || cell.temperature >= 75) ? 'critical' :
+                               (calculatedVoltage > 3.9 || calculatedVoltage < 3.0 || cell.temperature > 55) ? 'warning' : 'optimal';
 
-          return { 
-            ...cell, 
-            voltage: Number(newVoltage.toFixed(3)), 
-            temperature: Number(newTemp.toFixed(2)),
-            soc: Number(newSoc.toFixed(1)),
-            soh: Number(newSoh.toFixed(2))
+            return {
+              ...cell,
+              soc: currentSoc,
+              temperature: Math.max(10, Math.min(85, cell.temperature + tempChange)),
+              voltage: Number(calculatedVoltage.toFixed(3)),
+              isIsolated: cellIsIsolated,
+              status: cellStatus
+            };
+          });
+
+          const isModuleIsolated = mod.isIsolated || newCells.some(c => c.isIsolated);
+          const avgSoc = newCells.reduce((acc, c) => acc + c.soc, 0) / (newCells.length || 1);
+          const avgTemp = newCells.reduce((acc, c) => acc + c.temperature, 0) / (newCells.length || 1);
+          const avgVolt = newCells.reduce((acc, c) => acc + c.voltage, 0) / (newCells.length || 1);
+
+          return {
+            ...mod,
+            cells: newCells,
+            avgSoc,
+            avgTemp,
+            avgVoltage: avgVolt,
+            isIsolated: isModuleIsolated,
+            status: isModuleIsolated || avgVolt >= 4.0 || avgVolt < 2.0 || avgTemp > 75 ? 'critical' : 
+                    avgVolt < 3.0 || avgVolt > 3.9 || avgTemp > 55 ? 'warning' : 'optimal'
           };
         });
-
-        // Update Capacity History
-        const avgSoc = newCells.reduce((acc, c) => acc + c.soc, 0) / newCells.length;
-        setCapacityHistory(prev => {
-          const newHistory = [...prev, { time: new Date().toLocaleTimeString(), soc: Number(avgSoc.toFixed(1)) }];
-          return newHistory.slice(-20); // Keep last 20 points
-        });
-
-        return newCells;
       });
 
-      // Update Motor Stats - REMOVED
+      // Accumulate charge cycles proportional to charging rate
+      if (evChargingInput > 0) {
+        const speedFactor = simulationSpeed;
+        const chargeFromCharging = (evChargingInput / 1000 * 0.5) * speedFactor;
+        setChargeCycles(prev => prev + (chargeFromCharging / 100));
+      }
+
+      // Update Capacity History
+      setCapacityHistory(prev => {
+         const avgSoc = (modules || []).reduce((acc, m) => acc + (m.avgSoc || 0), 0) / (modules?.length || 1);
+         return [...prev, { time: new Date().toLocaleTimeString(), soc: Number(avgSoc.toFixed(1)) }].slice(-20);
+      });
+
     }, 1000);
     return () => clearInterval(interval);
-  }, [cells, solarVoltage, powerSource, globalTargetTemp, smartHomeAppliances]);
-
-  // Live Telemetry Interval
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isLiveSync && remoteUrl) {
-      interval = setInterval(async () => {
-        try {
-          const response = await fetch(remoteUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              timestamp: new Date().toISOString(),
-              pack_data: cells,
-              metadata: {
-                total_voltage: cells.reduce((acc, cell) => acc + cell.voltage, 0).toFixed(2),
-                avg_temp: (cells.reduce((acc, cell) => acc + cell.temperature, 0) / cells.length || 0).toFixed(1),
-                power_source: powerSource,
-                solar_voltage: solarVoltage,
-                smart_home_load: smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0)
-              }
-            }),
-          });
-          setLastSyncStatus({ time: new Date().toLocaleTimeString(), success: response.ok });
-        } catch (error) {
-          setLastSyncStatus({ time: new Date().toLocaleTimeString(), success: false });
-        }
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isLiveSync, remoteUrl, cells, powerSource, solarVoltage, smartHomeAppliances]);
-
-  // Internal Telemetry Sync for Remote Dashboard API
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setGridFrequency(59.95 + Math.random() * 0.1);
-      if (Math.random() > 0.99) {
-        setCyberSecurityIntegrity(prev => Math.max(80, prev - Math.random() * 5));
-      } else {
-        setCyberSecurityIntegrity(prev => Math.min(100, prev + 0.1));
-      }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      const totalLoadPower = smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0);
-      const avgSoc = cells.reduce((acc, c) => acc + c.soc, 0) / cells.length;
-      const avgTemp = cells.reduce((acc, c) => acc + c.temperature, 0) / cells.length;
-      const totalPackVoltage = cells.reduce((acc, c) => acc + c.voltage, 0);
-      const totalCurrent = totalLoadPower / (totalPackVoltage || 296);
-
-      const telemetryData = {
-        solarVoltage: solarVoltage,
-        packVoltage: Number(totalPackVoltage.toFixed(1)),
-        loadPowerWatts: Number(totalLoadPower.toFixed(1)),
-        loadPowerPercent: Number(((totalLoadPower / 5000) * 100).toFixed(1)),
-        soc: Number(avgSoc.toFixed(1)),
-        temp: Number(avgTemp.toFixed(1)),
-        current: Number(totalCurrent.toFixed(2)),
-        anomalyDetected: aiAnalysis?.status === 'critical' || aiAnalysis?.status === 'warning',
-        anomalyDetails: {
-          message: aiAnalysis?.alert || "System Normal",
-          location: aiAnalysis?.status === 'critical' ? "Cell Stack Anomaly" : "All Systems Nominal"
-        }
-      };
-
-      try {
-        await fetch("/api/telemetry", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(telemetryData),
-        });
-      } catch (error) {
-        // Silent fail for internal sync
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [cells, smartHomeAppliances, solarVoltage, aiAnalysis]);
-
-  useEffect(() => {
-    if (isDemandResponseActive) {
-      const nonEssentialTypes = ['air_conditioner', 'washing_machine', 'ev_charger'];
-      setSmartHomeAppliances(prev => prev.map(app => {
-        if (nonEssentialTypes.includes(app.type) && app.isOn) {
-          return { ...app, isOn: false };
-        }
-        return app;
-      }));
-      // Auto-set Status for AI to pick up
-      if (!aiAnalysis || aiAnalysis.status === 'normal') {
-        setAiAnalysis({
-          cells: [],
-          status: 'warning',
-          alert: 'GRID-INITIATED DD RESPONSE EVENT',
-          recommendation: 'Non-essential high-power loads (AC, EVs) have been autonomously shed to stabilize local frequency regulation.'
-        });
-      }
-    }
-  }, [isDemandResponseActive]);
+  }, [throttle, regenerativeBraking, evChargingInput, globalTargetTemp, motorRpm, modules?.length, simulationSpeed]);
 
   // AI Monitoring Interval
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isAiMonitoring) {
       interval = setInterval(async () => {
-        const now = Date.now();
-        // Increased interval to 60 seconds to avoid rate limits
-        if (now - lastAiAnalysisTime.current > 60000 && !isAiAnalyzing) {
+        if (!isAiAnalyzing) {
           runAiAnalysis();
         }
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isAiMonitoring, cells, isAiAnalyzing]);
+  }, [isAiMonitoring, isAiAnalyzing]);
 
   const runAiAnalysis = async () => {
+    const now = Date.now();
+    
+    // Calculate anomalies to determine if we should throttle
+    const anomalousCells = modules.flatMap(m => m.cells)
+      .filter(c => c.voltage >= 3.9 || c.voltage < 2.0 || c.temperature > 55 || c.isIsolated)
+      .slice(0, 20)
+      .map(c => ({ id: c.id, v: c.voltage, t: c.temperature, isolated: c.isIsolated }));
+
+    const hasAnomalies = anomalousCells.length > 0;
+    const timeSinceLast = now - lastAiAnalysisTime.current;
+    
+    // If no anomalies, wait at least 10 minutes between automatic checks
+    // If there ARE anomalies, use the dynamic cooldown (starts at 120s)
+    const minWait = hasAnomalies ? aiCooldownRef.current : 600000;
+
+    if (timeSinceLast < minWait) return;
+
     setIsAiAnalyzing(true);
-    lastAiAnalysisTime.current = Date.now();
+    setAiError(null);
+    lastAiAnalysisTime.current = now;
     
-    // Pre-process data to find outliers (single cell variances)
-    const avgVolt = cells.reduce((acc, c) => acc + c.voltage, 0) / cells.length;
-    const avgTemp = cells.reduce((acc, c) => acc + c.temperature, 0) / cells.length;
-    
-    const outliers = cells.filter(c => 
-      Math.abs(c.voltage - avgVolt) > 0.1 || 
-      Math.abs(c.temperature - avgTemp) > 5
-    ).slice(0, 10); // Limit to top 10 outliers for prompt length
+    const summaryData = modules.map(m => ({
+        id: m.id,
+        name: m.name,
+        avgSoc: (m.avgSoc ?? 0).toFixed(1),
+        avgTemp: (m.avgTemp ?? 0).toFixed(1),
+        avgVoltage: (m.avgVoltage ?? 3.7).toFixed(2),
+        status: m.status
+    }));
+
+    const params = {
+        rpm: motorRpm,
+        throttle: throttle,
+        regen: regenerativeBraking,
+        globalTemp: globalTargetTemp,
+        gridPower: gridPower
+    };
 
     try {
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Analyze this 10x10 battery pack data (100 cells). 
-        CRITICAL: You must alert if ANY single cell shows variance from the pack average (e.g., voltage deviation > 0.1V or temperature deviation > 5°C).
-        Focus on Battery Health (SOH), SOC balance, and thermal stability.
-        Identify anomalies, provide status (normal, warning, critical), a detailed health report message, and a technical recommendation.
+        contents: `Analyze EV Battery Pack.
+        Operational Parameters (RPM, Throttle, Regen): ${JSON.stringify(params)}
+        Pack Summary: ${JSON.stringify(summaryData)}
+        Anomalous Cells Sample: ${JSON.stringify(anomalousCells)}
+        Historical Analysis (last 5 reports): ${JSON.stringify(analysisHistory)}
         
-        System Context:
-        Power Source: ${powerSource}, Solar: ${solarVoltage}V, Smart Home Load: ${smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0)}W.
+        PERSONA: You are the "Conscious Battery Pack". Talk as if the cells are part of your body. Be modular, clear, and personality-driven.
+        LANGUAGE: Respond in ${aiLanguage === 'hi' ? 'Hindi' : aiLanguage === 'ta' ? 'Tamil' : aiLanguage === 'ml' ? 'Malayalam' : 'English'}.
         
-        Full Battery Pack Data (100 Cells): ${JSON.stringify(cells)}
-        Detected Outliers (Single Cell Variances): ${JSON.stringify(outliers)}
-        
-        Research Focus Areas:
-        - Digital Twin Calibration: Ensure the virtual model matches physical telemetry.
-        - Cybersecurity: Note any suspicious patterns in cell communication.
-        - Smart Grid Integration: Advise on how the pack can support the grid (e.g., peak shaving).
-        - Demand Response: Should non-essential loads be shed to preserve pack health?
-        
-        (Identify ALL cells that show anomalies, not just the outliers)`,
+        CRITICAL TASK:
+        1. Identify any packs or cells where parameters variation occur (Red: >4.0V or <2.0V, Yellow: 3.85V-3.95V).
+        2. Specifically check for modules that have been ISOLATED (Cutoff) for safety.
+        3. Provide modular recommendation (Status, Warning, Action).
+        4. When a module is isolated, explain to the user that you had to "Cutoff my own limb" to protect the rest of my body.
+        5. Assign a Professional Service Technician and Location (Tesla Certified Service Center / NexGen Battery Lab).
+        6. Identify badModuleIds and badCellIds.
+        7. Keep the tone like a "Talking Battery" that is currently FEELING its own physical isolation and self-preservation.
+        8. Remember: 3.8V is your healthy peak pressure. Only feel pain if it exceeds 3.9V.
+
+        Return JSON with: 
+        - alert (summary of findings)
+        - status (normal, warning, critical)
+        - recommendation (action steps)
+        - servicePerson (name of professional)
+        - servicePersonRating (0-5 rating of professional)
+        - serviceLocation (where to go)
+        - badModuleIds (array of module IDs)
+        - badCellIds (array of cell IDs)`,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              cells: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.NUMBER },
-                    name: { type: Type.STRING },
-                    voltage: { type: Type.NUMBER },
-                    current: { type: Type.NUMBER },
-                    temperature: { type: Type.NUMBER }
-                  },
-                  required: ["id", "name", "voltage", "current", "temperature"]
-                }
-              },
               alert: { type: Type.STRING },
               status: { type: Type.STRING, enum: ["normal", "warning", "critical"] },
-              recommendation: { type: Type.STRING }
+              recommendation: { type: Type.STRING },
+              servicePerson: { type: Type.STRING },
+              servicePersonRating: { type: Type.NUMBER },
+              serviceLocation: { type: Type.STRING },
+              badModuleIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+              badCellIds: { type: Type.ARRAY, items: { type: Type.STRING } }
             },
-            required: ["cells", "alert", "status", "recommendation"]
+            required: ["alert", "status", "recommendation", "servicePerson", "servicePersonRating", "serviceLocation", "badModuleIds", "badCellIds"]
           }
         }
       });
 
       const result = JSON.parse(response.text) as AIAnalysis;
+      setAnalysisHistory(prev => [{
+          ...result,
+          state: { summaryData, params }
+      }, ...prev].slice(0, 5));
       setAiAnalysis(result);
-      setAiCells(result.cells);
+      
+      const badCells = modules.flatMap(m => m.cells).filter(c => result.badCellIds?.includes(c.id));
+      setAiCells(badCells);
+      
+      // Success: slowly decrease cooldown to minimum 60s
+      aiCooldownRef.current = Math.max(60000, aiCooldownRef.current - 10000);
     } catch (error: any) {
       console.error("AI Analysis failed:", error);
-      // Handle rate limiting (429) gracefully
-      if (error?.message?.includes('429') || error?.status === 429) {
-        setAiAnalysis({
-          cells: [],
-          alert: "AI Rate Limit Reached. Retrying in 1 minute...",
-          status: 'warning',
-          recommendation: "The system is currently experiencing high demand. Automated monitoring will resume shortly."
-        });
+      
+      const errorJsonString = error instanceof Error ? error.message : String(error);
+      const isQuotaError = errorJsonString.includes('429') || 
+                          errorJsonString.includes('RESOURCE_EXHAUSTED') || 
+                          errorJsonString.includes('quota');
+
+      if (isQuotaError) {
+        // Increase cooldown significantly (up to 10 minutes)
+        const nextCooldown = Math.min(600000, aiCooldownRef.current + 120000);
+        aiCooldownRef.current = nextCooldown;
+        setAiRetryIn(Math.floor(nextCooldown / 1000));
+        setAiError(`Gemini API Quota Exceeded. To fix this, please provide your own API Key in the AI Studio Secrets panel. Cooling down for ${Math.floor(nextCooldown / 60)} minutes...`);
       } else {
-        setAiAnalysis({
-          cells: [],
-          alert: "AI Monitoring Service Unavailable",
-          status: 'warning',
-          recommendation: "Please check your network connection or try again later."
-        });
+        setAiError("AI Analysis encountered an error. Monitoring pauses temporarily.");
+        aiCooldownRef.current = Math.min(600000, aiCooldownRef.current + 60000);
       }
     } finally {
       setIsAiAnalyzing(false);
-    }
-  };
-
-  const fetchCells = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch("/api/battery-pack");
-      const data = await response.json();
-      setCells(data);
-    } catch (error) {
-      console.error("Failed to fetch battery data:", error);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -994,7 +1058,7 @@ export default function App() {
         body: JSON.stringify(cells),
       });
       if (response.ok) {
-        alert("Battery pack configuration saved to cloud!");
+        alert("Energy pack configuration saved to cloud!");
       }
     } catch (error) {
       console.error("Failed to save battery data:", error);
@@ -1003,13 +1067,14 @@ export default function App() {
     }
   };
 
-  const updateCell = (id: number, updates: Partial<BatteryCell>) => {
-    const newCells = cells.map((cell) =>
-      cell.id === id ? { ...cell, ...updates } : cell
-    );
-    setCells(newCells);
+  const updateCell = (id: string, updates: Partial<BatteryCell>) => {
+    const newModules = modules.map(mod => ({
+      ...mod,
+      cells: mod.cells.map(cell => cell.id === id ? { ...cell, ...updates } : cell)
+    }));
+    setModules(newModules);
     if (selectedCell?.id === id) {
-      setSelectedCell({ ...selectedCell, ...updates });
+      setSelectedCell({ ...selectedCell, ...updates } as BatteryCell);
     }
   };
 
@@ -1024,29 +1089,76 @@ export default function App() {
   };
 
   const getStatusColor = (cell: BatteryCell) => {
-    if (cell.temperature > 60 || cell.voltage > 4.2 || cell.voltage < 3.0) {
+    if (!cell) return "bg-zinc-800 border-zinc-700 text-zinc-500";
+    const v = cell.voltage;
+    
+    if (v > 4.0 || v < 2.0 || cell.isIsolated) {
       return "bg-red-500/20 border-red-500 text-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]";
     }
-    if (cell.temperature > 45 || cell.voltage > 4.0) {
+    if (v > 3.9 || v < 2.5) {
+      return "bg-orange-500/20 border-orange-500 text-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.2)]";
+    }
+    if (v < 3.0) {
       return "bg-yellow-500/20 border-yellow-500 text-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.1)]";
     }
     return "bg-green-500/20 border-green-500 text-green-500 shadow-[0_0_10px_rgba(34,197,94,0.1)]";
   };
 
-  const totalVoltage = cells.reduce((acc, cell) => acc + cell.voltage, 0).toFixed(2);
-  const avgTemp = (cells.reduce((acc, cell) => acc + cell.temperature, 0) / cells.length || 0).toFixed(1);
+  const calculateRangeRaw = () => "12h 30m"; // Placeholder for UI
+
+  const totalVoltage = cells.reduce((acc, cell) => acc + (cell?.voltage || 0), 0).toFixed(2);
+  const avgTemp = (cells.reduce((acc, cell) => acc + (cell?.temperature || 0), 0) / (cells.length || 1)).toFixed(1);
 
   return (
     <Router>
       <Routes>
-        <Route path="/remote" element={<RemoteDashboard onBack={() => window.location.href = '/'} />} />
+        <Route path="/remote" element={<RemoteDashboard 
+          onBack={() => window.location.href = '/'} 
+          simulationSpeed={simulationSpeed}
+          setSimulationSpeed={setSimulationSpeed}
+          modules={modules}
+          throttle={throttle}
+          evChargingInput={evChargingInput}
+          chargeCycles={chargeCycles}
+        />} />
+        <Route path="/telemetry" element={
+          <div className="min-h-screen bg-zinc-950 p-8">
+            <h1 className="text-white text-2xl font-bold mb-4">Pack Telemetry View</h1>
+            <p className="text-zinc-500">Advanced diagnostic tools for EV battery packs.</p>
+            <button onClick={() => window.location.href = '/'} className="mt-4 px-4 py-2 bg-zinc-800 text-white rounded">Back</button>
+          </div>
+        } />
+        <Route path="/ai-support" element={
+          <AIAssistant 
+            onBack={() => window.location.href = '/'} 
+            aiLanguage={aiLanguage}
+            setAiLanguage={setAiLanguage}
+            bmsData={{
+              modules: modules.map(m => ({
+                id: m.id,
+                name: m.name,
+                avgSoc: (m.avgSoc ?? 0).toFixed(1),
+                avgTemp: (m.avgTemp ?? 0).toFixed(1),
+                status: m.status
+              })),
+              motorRpm,
+              throttle,
+              totalVoltage,
+              avgTemp
+            }}
+          />
+        } />
         <Route path="/" element={<MainApp 
-          cells={cells}
-          setCells={setCells}
+          modules={modules}
+          setModules={setModules}
+          selectedModule={selectedModule}
+          setSelectedModule={setSelectedModule}
           loading={loading}
           saving={saving}
           isAiMonitoring={isAiMonitoring}
           setIsAiMonitoring={setIsAiMonitoring}
+          aiError={aiError}
+          aiRetryIn={aiRetryIn}
           isMuted={isMuted}
           setIsMuted={setIsMuted}
           aiAnalysis={aiAnalysis}
@@ -1054,15 +1166,16 @@ export default function App() {
           aiCells={aiCells}
           setAiCells={setAiCells}
           isAiAnalyzing={isAiAnalyzing}
+          aiLanguage={aiLanguage}
+          setAiLanguage={setAiLanguage}
+          runAiAnalysis={runAiAnalysis}
           activeView={activeView}
           setActiveView={setActiveView}
           powerSource={powerSource}
           setPowerSource={setPowerSource}
-          solarVoltage={solarVoltage}
-          setSolarVoltage={setSolarVoltage}
-          smartHomeAppliances={smartHomeAppliances}
-          toggleAppliance={toggleAppliance}
-          calculateRuntime={calculateRuntime}
+          evChargingInput={evChargingInput}
+          setEvChargingInput={setEvChargingInput}
+          calculateRange={calculateRange}
           totalVoltage={totalVoltage}
           avgTemp={avgTemp}
           getStatusColor={getStatusColor}
@@ -1074,8 +1187,6 @@ export default function App() {
           lastSyncStatus={lastSyncStatus}
           globalTargetTemp={globalTargetTemp}
           setGlobalTargetTemp={setGlobalTargetTemp}
-          show3D={show3D}
-          setShow3D={setShow3D}
           timeOfDay={timeOfDay}
           setTimeOfDay={setTimeOfDay}
           isFullscreen={isFullscreen}
@@ -1084,17 +1195,21 @@ export default function App() {
           setSelectedCell={setSelectedCell}
           updateCell={updateCell}
           saveCells={saveCells}
-          showRuntimeGraph={showRuntimeGraph}
-          setShowRuntimeGraph={setShowRuntimeGraph}
-          getRuntimeProjectionData={getRuntimeProjectionData}
-          gridMode={gridMode}
-          setGridMode={setGridMode}
+          getRangeProjectionData={getRangeProjectionData}
+          motorRpm={motorRpm}
+          throttle={throttle}
+          setThrottle={setThrottle}
+          regenerativeBraking={regenerativeBraking}
+          setRegenerativeBraking={setRegenerativeBraking}
           cyberSecurityIntegrity={cyberSecurityIntegrity}
-          isDemandResponseActive={isDemandResponseActive}
-          setIsDemandResponseActive={setIsDemandResponseActive}
           gridFrequency={gridFrequency}
-          solarChargingPower={solarChargingPower}
           gridPower={gridPower}
+          analysisHistory={analysisHistory}
+          chargeCycles={chargeCycles}
+          selectedStationId={selectedStationId}
+          setSelectedStationId={setSelectedStationId}
+          simulationSpeed={simulationSpeed}
+          setSimulationSpeed={setSimulationSpeed}
         />} />
       </Routes>
     </Router>
@@ -1102,22 +1217,24 @@ export default function App() {
 };
 
 const MainApp = ({ 
-  cells, setCells, loading, saving, isAiMonitoring, setIsAiMonitoring, 
+  modules, setModules, loading, saving, isAiMonitoring, setIsAiMonitoring, 
+  aiError, aiRetryIn,
   isMuted, setIsMuted,
   aiAnalysis, setAiAnalysis, aiCells, setAiCells, isAiAnalyzing, 
+  aiLanguage, setAiLanguage, runAiAnalysis,
   activeView, setActiveView, powerSource, setPowerSource, 
-  solarVoltage, setSolarVoltage, smartHomeAppliances, toggleAppliance, 
-  calculateRuntime, totalVoltage, avgTemp, getStatusColor, capacityHistory,
+  evChargingInput, setEvChargingInput, selectedModule, setSelectedModule,
+  calculateRange, totalVoltage, avgTemp, getStatusColor, capacityHistory,
   isLiveSync, setIsLiveSync, remoteUrl, setRemoteUrl, lastSyncStatus,
-  globalTargetTemp, setGlobalTargetTemp, show3D, setShow3D, timeOfDay,
+  globalTargetTemp, setGlobalTargetTemp, timeOfDay,
   setTimeOfDay, isFullscreen, toggleFullscreen, selectedCell, 
-  setSelectedCell, updateCell, saveCells, showRuntimeGraph, 
-  setShowRuntimeGraph, getRuntimeProjectionData,
-  gridMode, setGridMode, cyberSecurityIntegrity, isDemandResponseActive,
-  setIsDemandResponseActive, gridFrequency, solarChargingPower, gridPower
+  setSelectedCell, updateCell, saveCells, getRangeProjectionData,
+  motorRpm, throttle, setThrottle, regenerativeBraking, setRegenerativeBraking,
+  cyberSecurityIntegrity, gridFrequency, gridPower, analysisHistory, chargeCycles,
+  selectedStationId, setSelectedStationId, simulationSpeed, setSimulationSpeed
 }: any) => {
   const navigate = useNavigate();
-  const totalLoadPower = smartHomeAppliances.reduce((acc, app: any) => acc + (app.isOn ? app.power : 0), 0);
+  const totalLoadPower = (throttle / 100) * 150000; // Max 150kW
   const isEmergency = aiAnalysis?.status === 'critical' || aiAnalysis?.status === 'warning';
   const isCritical = aiAnalysis?.status === 'critical';
   
@@ -1134,20 +1251,38 @@ const MainApp = ({
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-zinc-100 font-sans p-4 md:p-6">
-      <header className="max-w-[1600px] mx-auto mb-6 flex flex-col md:flex-row md:items-end justify-between gap-6">
+      <header className="max-w-full px-6 mx-auto mb-6 flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
           <div className="flex items-center gap-2 mb-2">
             <div className={`w-2 h-2 rounded-full ${powerSource === 'solar' ? 'bg-yellow-500' : 'bg-emerald-500'} animate-pulse`} />
             <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-zinc-500">
-              Power Source: <span className={powerSource === 'solar' ? 'text-yellow-500' : 'text-emerald-500'}>{powerSource.toUpperCase()}</span>
+              Power Source: <span className={powerSource === 'solar' ? 'text-yellow-500' : 'text-emerald-500'}>{(powerSource || '').toUpperCase()}</span>
             </span>
           </div>
           <h1 className="text-3xl md:text-4xl font-bold tracking-tighter text-white">
-            VIRTUAL <span className="text-emerald-500">BATTERY</span> PACK <span className="text-zinc-700 text-2xl">10x10</span>
+            EV <span className="text-blue-500">BATTERY</span> ARCHITECTURE <span className="text-zinc-700 text-2xl uppercase font-mono">Pack 1</span>
           </h1>
         </div>
 
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap items-center gap-4">
+          {/* Simulation Speed Slider */}
+          <div className="flex items-center gap-3 bg-zinc-900 border border-zinc-800 px-4 py-2 rounded-lg">
+            <Clock className="w-4 h-4 text-emerald-500" />
+            <div className="flex flex-col">
+              <span className="text-[8px] uppercase text-zinc-500 font-mono tracking-widest">Sim Rate</span>
+              <div className="flex items-center gap-2">
+                <input 
+                  type="range" 
+                  min="1" 
+                  max="100" 
+                  value={simulationSpeed} 
+                  onChange={(e) => setSimulationSpeed(parseInt(e.target.value))}
+                  className="w-20 accent-emerald-500 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                />
+                <span className="text-[10px] font-mono font-bold text-emerald-400 w-8">{simulationSpeed}x</span>
+              </div>
+            </div>
+          </div>
           <button
             onClick={toggleFullscreen}
             className="flex items-center gap-2 px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-400 hover:bg-zinc-700 rounded-lg transition-all text-sm font-medium"
@@ -1156,15 +1291,8 @@ const MainApp = ({
             {isFullscreen ? 'EXIT FULLSCREEN' : 'FULLSCREEN'}
           </button>
           <button
-            onClick={() => setShow3D(!show3D)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all text-sm font-medium border ${show3D ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-700'}`}
-          >
-            <Settings2 className={`w-4 h-4 ${show3D ? 'rotate-90' : ''} transition-transform`} />
-            {show3D ? 'VIEW 2D GRID' : 'VIEW 3D STACK'}
-          </button>
-          <button
             onClick={() => setIsAiMonitoring(!isAiMonitoring)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all text-sm font-medium border shadow-lg ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all text-sm font-medium border shadow-lg relative ${
               isAiMonitoring 
                 ? aiAnalysis?.status === 'critical' 
                   ? 'bg-red-600 border-red-400 text-white animate-bounce' 
@@ -1180,8 +1308,15 @@ const MainApp = ({
                 ? 'AI CRITICAL ALERT' 
                 : aiAnalysis?.status === 'warning'
                   ? 'AI WARNING ACTIVE'
-                  : 'AI MONITORING ON' 
+                  : isAiAnalyzing
+                    ? 'AI ANALYZING...'
+                    : 'AI MONITORING ON' 
               : 'START AI MONITOR'}
+            {aiError && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-red-950/90 border border-red-500/50 p-2 rounded text-[9px] text-red-200 backdrop-blur-sm z-50 animate-in fade-in slide-in-from-top-1 w-max min-w-full">
+                {aiRetryIn > 0 ? `AI Quota Exceeded. Retry in ${aiRetryIn}s` : aiError}
+              </div>
+            )}
           </button>
           <button
             onClick={() => setIsMuted(!isMuted)}
@@ -1207,6 +1342,13 @@ const MainApp = ({
             </button>
           </div>
           <button
+            onClick={() => navigate('/ai-support')}
+            className="flex items-center gap-2 px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-400 hover:bg-zinc-700 rounded-lg transition-all text-sm font-medium"
+          >
+            <Brain className="w-4 h-4 text-emerald-500" />
+            AI SUPPORT
+          </button>
+          <button
             onClick={saveCells}
             disabled={saving}
             className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg transition-all text-sm font-medium"
@@ -1217,227 +1359,79 @@ const MainApp = ({
         </div>
       </header>
 
-      <main className="max-w-[1600px] mx-auto grid grid-cols-1 xl:grid-cols-4 gap-6">
+      <main className="max-w-full px-6 mx-auto grid grid-cols-1 xl:grid-cols-5 gap-6">
         
         {/* Left Column: Power & Loads */}
         <div className="xl:col-span-1 space-y-6">
-          {/* Solar Panel Control */}
-          <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <Sun className={`w-5 h-5 ${timeOfDay === 'noon' ? 'text-yellow-500' : timeOfDay === 'dawn' ? 'text-orange-400' : 'text-zinc-600'}`} />
-                <span className="text-xs font-mono uppercase tracking-widest text-zinc-500">Solar Cycle</span>
-              </div>
-              <div className={`text-[10px] font-mono px-2 py-0.5 rounded ${powerSource === 'solar' ? 'bg-yellow-500/20 text-yellow-500' : 'bg-zinc-800 text-zinc-600'}`}>
-                {solarVoltage}V
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-4 gap-2 mb-4">
-              {(['dawn', 'noon', 'evening', 'night'] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setTimeOfDay(t)}
-                  className={`text-[8px] font-mono uppercase py-2 rounded border transition-all ${
-                    timeOfDay === t 
-                      ? 'bg-yellow-500/20 border-yellow-500 text-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.2)]' 
-                      : 'bg-zinc-800/50 border-zinc-700 text-zinc-500 hover:bg-zinc-800'
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
 
-            <input
-              type="range"
-              min="0"
-              max="400"
-              value={solarVoltage}
-              onChange={(e) => setSolarVoltage(parseInt(e.target.value))}
-              className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-yellow-500"
-            />
-          </div>
-
-          {/* Smart Grid Control Panel */}
+          {/* Range & Efficiency Panel */}
           <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-2xl space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <Globe className="w-5 h-5 text-purple-500" />
-                <span className="text-xs font-mono uppercase tracking-widest text-zinc-500">Grid Integration</span>
+                <Zap className="w-5 h-5 text-blue-500" />
+                <span className="text-xs font-mono uppercase tracking-widest text-zinc-500">Range Estimation</span>
               </div>
-              <div className={`text-[10px] font-mono px-2 py-0.5 rounded ${isDemandResponseActive ? 'bg-red-500/20 text-red-500 animate-pulse' : 'bg-emerald-500/20 text-emerald-500'}`}>
-                {isDemandResponseActive ? 'DR EVENT ACTIVE' : 'GRID STABLE'}
+              <div className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/20 text-blue-500">
+                85.4% EFFICIENCY
               </div>
             </div>
 
             <div className="grid grid-cols-1 gap-2">
-              <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 flex justify-between items-center">
+              <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex justify-between items-center">
                 <div>
-                  <div className="text-[10px] font-mono text-zinc-600 uppercase">Frequency</div>
-                  <div className="text-sm font-bold text-white">{gridFrequency.toFixed(3)} Hz</div>
+                  <div className="text-[10px] font-mono text-zinc-600 uppercase">Estimated Range</div>
+                  <div className="text-2xl font-black text-white">{calculateRange()} km</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-[10px] font-mono text-zinc-600 uppercase">Security Score</div>
-                  <div className={`text-sm font-bold ${cyberSecurityIntegrity > 95 ? 'text-emerald-500' : 'text-red-500'}`}>{cyberSecurityIntegrity.toFixed(1)}%</div>
+                  <div className="text-[10px] font-mono text-zinc-600 uppercase">Consumption</div>
+                  <div className="text-lg font-bold text-blue-400">{(totalLoadPower / 1000).toFixed(1)} kW</div>
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest px-1">Grid Services Mode</div>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['standby', 'peak_shaving', 'frequency_regulation'] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      onClick={() => setGridMode(mode)}
-                      className={`text-[8px] font-bold uppercase py-2 rounded-lg border transition-all ${
-                        gridMode === mode 
-                          ? 'bg-purple-500/20 border-purple-500 text-purple-400' 
-                          : 'bg-zinc-800/50 border-zinc-700 text-zinc-600 hover:bg-zinc-800'
-                      }`}
-                    >
-                      {mode.replace('_', ' ')}
-                    </button>
-                  ))}
+              <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex justify-between items-center">
+                <div>
+                  <div className="text-[10px] font-mono text-zinc-600 uppercase">Avg SOC</div>
+                  <div className="text-2xl font-black text-emerald-500">{(modules.reduce((acc, m) => acc + m.avgSoc, 0) / (modules.length || 1)).toFixed(1)}%</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] font-mono text-zinc-600 uppercase">Pack SOH</div>
+                  <div className="text-lg font-bold text-zinc-300">98.2%</div>
                 </div>
               </div>
-              
-              <button
-                onClick={() => setIsDemandResponseActive(!isDemandResponseActive)}
-                className={`w-full py-2 rounded-lg border text-[10px] font-black uppercase tracking-widest transition-all ${
-                  isDemandResponseActive 
-                    ? 'bg-red-500 border-red-400 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)]' 
-                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-700'
-                }`}
-              >
-                {isDemandResponseActive ? 'DISENGAGE DEMAND RESPONSE' : 'SIMULATE GRID EVENT'}
-              </button>
-            </div>
-          </div>
 
-          {/* Smart Home Load Summary */}
-          <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-2xl space-y-4">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-3">
-                <Zap className="w-5 h-5 text-orange-500" />
-                <span className="text-xs font-mono uppercase tracking-widest text-zinc-500">Active Home Loads</span>
-              </div>
-              <button 
-                onClick={() => setActiveView('smarthome')}
-                className="text-[10px] font-mono text-emerald-500 hover:text-emerald-400 uppercase tracking-widest"
-              >
-                Manage
-              </button>
-            </div>
-            
-            <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
-              {smartHomeAppliances.filter(app => app.isOn).map(app => (
-                <div key={app.id} className="flex items-center justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-800/50">
-                  <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-xs font-bold text-white uppercase">{app.name}</span>
-                  </div>
-                  <span className="text-xs font-mono text-orange-400">{app.power}W</span>
+              <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex justify-between items-center">
+                <div>
+                  <div className="text-[10px] font-mono text-zinc-600 uppercase">Charge Cycles</div>
+                  <div className="text-2xl font-black text-blue-500">{chargeCycles.toFixed(2)}</div>
                 </div>
-              ))}
-              {smartHomeAppliances.filter(app => app.isOn).length === 0 && (
-                <div className="text-center py-8 text-zinc-600 text-[10px] uppercase font-mono border border-dashed border-zinc-800 rounded-xl">
-                  All appliances offline
+                <div className="text-right">
+                  <div className="text-[10px] font-mono text-zinc-600 uppercase">Status</div>
+                  <div className="text-lg font-bold text-emerald-500">Healthy</div>
                 </div>
-              )}
-            </div>
-
-            <div className="pt-4 border-t border-zinc-800 flex justify-between items-end">
-              <div>
-                <div className="text-[10px] font-mono text-zinc-500 uppercase">Total Load</div>
-                <div className="text-2xl font-black text-white">
-                  {smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0)}W
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-[10px] font-mono text-zinc-500 uppercase">Runtime</div>
-                <div className="text-lg font-bold text-emerald-500">{calculateRuntime()}</div>
               </div>
             </div>
           </div>
 
-          {/* System Stats */}
-          <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-2xl grid grid-cols-2 gap-4">
-            <div>
-              <div className="text-[10px] font-mono text-zinc-500 uppercase mb-1">Total Pack</div>
-              <div className="text-xl font-bold">{totalVoltage}V</div>
-            </div>
-            <div>
-              <div className="text-[10px] font-mono text-zinc-500 uppercase mb-1">Avg Temp</div>
-              <div className="text-xl font-bold">{avgTemp}°C</div>
-            </div>
-            <div className="col-span-2 pt-2 border-t border-zinc-800/50">
-              <div className="flex justify-between items-center">
-                <div className="text-[10px] font-mono text-zinc-500 uppercase">Est. Runtime</div>
-                <button 
-                  onClick={() => setShowRuntimeGraph(!showRuntimeGraph)}
-                  className={`text-[10px] font-mono px-2 py-0.5 rounded border transition-all ${showRuntimeGraph ? 'bg-emerald-500/20 border-emerald-500 text-emerald-500' : 'bg-zinc-800 border-zinc-700 text-zinc-500 hover:bg-zinc-700'}`}
-                >
-                  {showRuntimeGraph ? 'CLOSE GRAPH' : 'VIEW GRAPH'}
-                </button>
-              </div>
-              <div className={`text-sm font-bold mt-1 ${calculateRuntime() === 'Charging' ? 'text-yellow-500' : 'text-emerald-500'}`}>
-                {calculateRuntime()}
-              </div>
-            </div>
-          </div>
-
-          {showRuntimeGraph && (
-            <motion.div 
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-2xl overflow-hidden"
-            >
-              <div className="text-[10px] font-mono text-zinc-500 uppercase mb-4">Runtime Projection (SOC vs Time)</div>
-              <div className="h-40 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={getRuntimeProjectionData()}>
-                    <defs>
-                      <linearGradient id="colorRuntime" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                    <XAxis dataKey="hour" stroke="#52525b" fontSize={10} />
-                    <YAxis domain={[0, 100]} stroke="#52525b" fontSize={10} />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', fontSize: '10px' }}
-                      itemStyle={{ color: '#10b981' }}
-                    />
-                    <Area type="monotone" dataKey="soc" stroke="#10b981" fillOpacity={1} fill="url(#colorRuntime)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </motion.div>
-          )}
-
-          {/* Global Temperature Control */}
+          {/* Thermal Management */}
           <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-2xl">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <Thermometer className="w-5 h-5 text-blue-400" />
-                <span className="text-xs font-mono uppercase tracking-widest text-zinc-500">Global Temp Control</span>
+                <span className="text-xs font-mono uppercase tracking-widest text-zinc-500">Active Cooling State</span>
               </div>
               <div className="text-[10px] font-mono text-blue-400">{globalTargetTemp}°C</div>
             </div>
             <input
               type="range"
-              min="0"
-              max="60"
+              min="15"
+              max="45"
               value={globalTargetTemp}
               onChange={(e) => setGlobalTargetTemp(parseInt(e.target.value))}
               className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
             />
-            <div className="flex justify-between mt-2 text-[8px] font-mono text-zinc-600 uppercase">
-              <span>Cooling</span>
-              <span>Heating</span>
+            <div className="flex justify-between mt-2 text-[8px] font-mono text-zinc-600 uppercase tracking-widest">
+              <span>Performance</span>
+              <span>longevity</span>
             </div>
           </div>
 
@@ -1454,7 +1448,7 @@ const MainApp = ({
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
                     <Settings2 className="w-4 h-4 text-emerald-500" />
-                    {selectedCell.name}
+                    CELL {String(selectedCell?.id || '').split('-').pop() ?? 'N/A'}
                   </h2>
                   <button onClick={() => setSelectedCell(null)} className="p-1 hover:bg-zinc-800 rounded-full transition-colors">
                     <X className="w-4 h-4 text-zinc-500" />
@@ -1466,8 +1460,8 @@ const MainApp = ({
                       <label className="block text-[10px] font-mono uppercase tracking-widest text-zinc-500 mb-2">SOC (%)</label>
                       <input
                         type="number"
-                        value={selectedCell.soc}
-                        onChange={(e) => updateCell(selectedCell.id, { soc: parseInt(e.target.value) })}
+                        value={selectedCell?.soc ?? 0}
+                        onChange={(e) => updateCell(selectedCell?.id || '', { soc: parseInt(e.target.value) })}
                         className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs font-mono"
                       />
                     </div>
@@ -1475,8 +1469,8 @@ const MainApp = ({
                       <label className="block text-[10px] font-mono uppercase tracking-widest text-zinc-500 mb-2">SOH (%)</label>
                       <input
                         type="number"
-                        value={selectedCell.soh}
-                        onChange={(e) => updateCell(selectedCell.id, { soh: parseInt(e.target.value) })}
+                        value={selectedCell?.soh ?? 0}
+                        onChange={(e) => updateCell(selectedCell?.id || '', { soh: parseInt(e.target.value) })}
                         className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs font-mono"
                       />
                     </div>
@@ -1488,8 +1482,8 @@ const MainApp = ({
                       min="2.5"
                       max="4.5"
                       step="0.1"
-                      value={selectedCell.voltage}
-                      onChange={(e) => updateCell(selectedCell.id, { voltage: parseFloat(e.target.value) })}
+                      value={selectedCell?.voltage ?? 3.7}
+                      onChange={(e) => updateCell(selectedCell?.id || '', { voltage: parseFloat(e.target.value) })}
                       className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                     />
                   </div>
@@ -1500,8 +1494,8 @@ const MainApp = ({
                       min="0"
                       max="100"
                       step="1"
-                      value={selectedCell.temperature}
-                      onChange={(e) => updateCell(selectedCell.id, { temperature: parseInt(e.target.value) })}
+                      value={selectedCell?.temperature ?? 25}
+                      onChange={(e) => updateCell(selectedCell?.id || '', { temperature: parseInt(e.target.value) })}
                       className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                     />
                   </div>
@@ -1511,215 +1505,404 @@ const MainApp = ({
           </AnimatePresence>
         </div>
 
-        {/* Middle Column: 10x10 Grid or 3D Stack or Detailed Distribution */}
-        <div className="xl:col-span-2">
+        {/* Middle Column: Grid or Distribution */}
+        <div className="xl:col-span-3">
           <div className="flex gap-2 mb-4 bg-zinc-900/50 p-1 rounded-xl border border-zinc-800 w-fit">
             <button 
               onClick={() => setActiveView('grid')}
-              className={`px-4 py-1.5 rounded-lg text-[10px] font-mono uppercase tracking-widest transition-all ${activeView === 'grid' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+              className={`px-4 py-1.5 rounded-lg text-[10px] font-mono uppercase tracking-widest transition-all ${activeView === 'grid' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
             >
-              System Grid
+              Pack Health
             </button>
             <button 
               onClick={() => setActiveView('distribution')}
-              className={`px-4 py-1.5 rounded-lg text-[10px] font-mono uppercase tracking-widest transition-all ${activeView === 'distribution' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+              className={`px-4 py-1.5 rounded-lg text-[10px] font-mono uppercase tracking-widest transition-all ${activeView === 'distribution' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
             >
-              Detailed Distribution
+              Distribution
             </button>
             <button 
-              onClick={() => setActiveView('smarthome')}
-              className={`px-4 py-1.5 rounded-lg text-[10px] font-mono uppercase tracking-widest transition-all ${activeView === 'smarthome' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+              onClick={() => setActiveView('architecture')}
+              className={`px-4 py-1.5 rounded-lg text-[10px] font-mono uppercase tracking-widest transition-all ${activeView === 'architecture' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
             >
-              Smart Home Simulation
+              EV Architecture
+            </button>
+            <button 
+              onClick={() => setActiveView('support')}
+              className={`px-4 py-1.5 rounded-lg text-[10px] font-mono uppercase tracking-widest transition-all ${activeView === 'support' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+            >
+              Service & Support
             </button>
           </div>
 
-          {activeView === 'grid' ? (
-            show3D ? (
-              <BatteryStack3D 
-                cells={cells} 
-                selectedCell={selectedCell} 
-                onSelect={setSelectedCell} 
-                timeOfDay={timeOfDay}
-                isAiMonitoring={isAiMonitoring}
-                aiCells={aiCells}
-                aiAnalysis={aiAnalysis}
-                isCharging={timeOfDay !== 'night' && !isEmergency}
-              />
-            ) : (
-              <div className="bg-zinc-900/20 border border-zinc-800/50 p-4 rounded-3xl">
-                <div className="grid grid-cols-10 gap-1.5 md:gap-2">
-                  {cells.map((cell) => {
-                    const isAnomaly = aiCells.some(c => c.id === cell.id) && aiAnalysis?.status !== 'normal';
-                    return (
-                      <motion.button
-                        key={cell.id}
-                        whileHover={{ scale: 1.1, zIndex: 10 }}
-                        whileTap={{ scale: 0.9 }}
-                        animate={isAnomaly ? {
-                          boxShadow: [
-                            "0 0 0px rgba(239, 68, 68, 0)",
-                            "0 0 20px rgba(239, 68, 68, 0.8)",
-                            "0 0 0px rgba(239, 68, 68, 0)"
-                          ],
-                          scale: [1, 1.05, 1]
-                        } : {}}
-                        transition={isAnomaly ? {
-                          duration: 1.5,
-                          repeat: Infinity,
-                          ease: "easeInOut"
-                        } : {}}
-                        onClick={() => setSelectedCell(cell)}
-                        className={`relative flex flex-col items-center justify-center p-1 rounded-full border transition-all aspect-square ${getStatusColor(cell)} ${selectedCell?.id === cell.id ? 'ring-1 ring-white ring-offset-2 ring-offset-[#0a0a0a]' : ''} ${timeOfDay !== 'night' && !isEmergency ? 'shadow-[0_0_15px_rgba(251,191,36,0.2)]' : ''} ${isAnomaly ? 'border-red-500 z-10' : ''}`}
+          {activeView === 'support' ? (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-[700px]">
+              {/* Service List */}
+              <div className="lg:col-span-1 space-y-6 overflow-y-auto pr-4 custom-scrollbar">
+                <div className="bg-zinc-900/40 border border-zinc-800 p-6 rounded-3xl">
+                  <h3 className="text-sm font-bold text-white uppercase tracking-widest mb-6 flex items-center gap-2">
+                    <Wrench className="w-4 h-4 text-emerald-400" />
+                    Emergency Experts
+                  </h3>
+                  <div className="space-y-4">
+                    {experts.map(ex => (
+                      <div key={ex.id} className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 hover:border-emerald-500/50 transition-colors">
+                        <div className="flex justify-between items-start mb-2">
+                          <div>
+                            <div className="text-white font-bold">{ex.name}</div>
+                            <div className="text-[10px] text-zinc-500 uppercase">{ex.role}</div>
+                          </div>
+                          <div className="flex items-center gap-1 text-yellow-500 text-[10px]">
+                            <Star className="w-3 h-3 fill-current" />
+                            {ex.rating}
+                          </div>
+                        </div>
+                        <div className="flex justify-between items-center mt-4">
+                          <span className="text-[9px] text-emerald-400 font-mono">{ex.distance}</span>
+                          <button className="bg-zinc-800 hover:bg-emerald-600 text-white p-2 rounded-lg transition-colors">
+                            <Phone className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900/40 border border-zinc-800 p-6 rounded-3xl">
+                  <h3 className="text-sm font-bold text-white uppercase tracking-widest mb-6 flex items-center gap-2">
+                    <History className="w-4 h-4 text-emerald-400" />
+                    Emergency Diagnosis Logs
+                  </h3>
+                  <div className="space-y-3">
+                    {analysisHistory.filter(h => h.status !== 'normal').length > 0 ? (
+                      analysisHistory.filter(h => h.status !== 'normal').map((h, i) => (
+                        <div key={i} className={`p-4 rounded-xl border ${h.status === 'critical' ? 'bg-red-500/10 border-red-500/30' : 'bg-yellow-500/10 border-yellow-500/30'}`}>
+                          <div className="flex items-center gap-2 mb-2">
+                            <AlertTriangle className={`w-3 h-3 ${h.status === 'critical' ? 'text-red-500' : 'text-yellow-500'}`} />
+                            <span className="text-[10px] font-bold text-white uppercase">AI Detection: {h.status}</span>
+                          </div>
+                          <div className="text-[11px] text-zinc-300 mb-2">{h.alert}</div>
+                          <div className="pt-2 border-t border-white/10 space-y-2">
+                            <div className="text-[9px] text-emerald-400 flex items-center gap-1">
+                              <User className="w-3 h-3" /> Recommended Expert: {h.servicePerson} ({h.servicePersonRating}★)
+                            </div>
+                            <div className="text-[9px] text-blue-400 flex items-center gap-1">
+                              <MapPin className="w-3 h-3" /> Recommended Station: {h.serviceLocation}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-8 text-zinc-600 text-[10px] uppercase font-mono italic">
+                        No critical events logged
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900/40 border border-zinc-800 p-6 rounded-3xl">
+                  <h3 className="text-sm font-bold text-white uppercase tracking-widest mb-6 flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-emerald-400" />
+                    Certified Stations
+                  </h3>
+                  <div className="space-y-4">
+                    {serviceStations.map(ss => (
+                      <div 
+                        key={ss.id} 
+                        onClick={() => setSelectedStationId(ss.id)}
+                        className={`bg-zinc-950 p-4 rounded-2xl border transition-all group cursor-pointer ${selectedStationId === ss.id ? 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)]' : 'border-zinc-800 hover:border-emerald-500/50'}`}
                       >
-                        {timeOfDay !== 'night' && !isEmergency && (
-                          <motion.div
-                            animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.6, 0.3] }}
-                            transition={{ duration: 2, repeat: Infinity }}
-                            className="absolute inset-0 rounded-full bg-yellow-400/20"
-                          />
-                        )}
-                        <Battery className={`w-3 h-3 md:w-4 md:h-4 ${timeOfDay !== 'night' && !isEmergency ? 'text-yellow-500' : ''}`} />
-                        <div className="text-[6px] md:text-[8px] font-bold mt-0.5">{cell.voltage.toFixed(1)}V</div>
-                        <div className="text-[5px] md:text-[6px] opacity-50">{cell.soc}%</div>
-                        
-                        <svg className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none">
-                          <circle
-                            cx="50%"
-                            cy="50%"
-                            r="45%"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1"
-                            strokeDasharray="100"
-                            strokeDashoffset={100 - Math.min(100, (cell.temperature / 100) * 100)}
-                            className="opacity-10 transition-all duration-500"
-                          />
-                        </svg>
-                      </motion.button>
-                    );
-                  })}
+                        <div className="flex justify-between items-start mb-1">
+                          <div className={`font-bold transition-colors ${selectedStationId === ss.id ? 'text-emerald-400' : 'text-white group-hover:text-emerald-400'}`}>{ss.name}</div>
+                          <div className="text-[10px] text-zinc-500">{ss.distance}</div>
+                        </div>
+                        <div className="text-[10px] text-zinc-500 mb-3">{ss.type}</div>
+                        <div className="flex justify-between items-center">
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full ${ss.status.includes('Open') ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
+                            {ss.status}
+                          </span>
+                          <button 
+                            className={`flex items-center gap-1 text-[10px] transition-colors ${selectedStationId === ss.id ? 'text-emerald-500 font-bold' : 'text-zinc-400 hover:text-white'}`}
+                          >
+                            {selectedStationId === ss.id ? 'Active Route' : 'Navigate'} <Navigation className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-            )
+
+              {/* Map Interface */}
+              <div className="lg:col-span-2 bg-zinc-950 rounded-[2.5rem] border border-zinc-800 relative overflow-hidden group">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(16,185,129,0.05)_0%,transparent_100%)] pointer-events-none" />
+                
+                {/* Mock Map Grid */}
+                <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle, #27272a 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+                             {/* Map Elements */}
+                <div className="absolute inset-0 flex items-center justify-center">
+                  {/* Navigation Path */}
+                  {selectedStationId && (
+                    <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible">
+                      <motion.path
+                        d={`M 50 50 L ${
+                          (serviceStations.find(s => s.id === selectedStationId)!.lng + 1) * 50
+                        } ${
+                          (serviceStations.find(s => s.id === selectedStationId)!.lat + 1) * 50
+                        }`}
+                        stroke="#10b981"
+                        strokeWidth="0.5"
+                        strokeDasharray="1 1"
+                        initial={{ pathLength: 0, opacity: 0 }}
+                        animate={{ pathLength: 1, opacity: 1 }}
+                        transition={{ duration: 1, ease: "easeInOut" }}
+                      />
+                      {/* Traveling Pulse */}
+                      <motion.circle
+                        r="1"
+                        fill="#10b981"
+                        initial={{ offsetDistance: "0%" }}
+                        animate={{ offsetDistance: "100%" }}
+                        transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                        style={{
+                          offsetPath: `path('M 50 50 L ${
+                            (serviceStations.find(s => s.id === selectedStationId)!.lng + 1) * 50
+                          } ${(serviceStations.find(s => s.id === selectedStationId)!.lat + 1) * 50}')`
+                        } as any}
+                      />
+                    </svg>
+                  )}
+
+                  {/* Current Position */}
+                  <div className="relative z-20">
+                    <div className="w-4 h-4 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_20px_rgba(16,185,129,0.8)]" />
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 border-2 border-emerald-500/20 rounded-full animate-[ping_3s_infinite]" />
+                  </div>
+
+                  {/* Service Station Pins */}
+                  {serviceStations.map(ss => (
+                    <motion.div 
+                      key={ss.id}
+                      initial={{ opacity: 0, scale: 0 }}
+                      animate={{ 
+                        opacity: 1, 
+                        scale: selectedStationId === ss.id ? 1.4 : 1,
+                        zIndex: selectedStationId === ss.id ? 30 : 10
+                      }}
+                      onClick={() => setSelectedStationId(ss.id)}
+                      className="absolute cursor-pointer"
+                      style={{ 
+                        left: `${(ss.lng + 1) * 50}%`, 
+                        top: `${(ss.lat + 1) * 50}%` 
+                      }}
+                    >
+                      <div className="relative group">
+                        <MapPin className={`w-6 h-6 transition-colors ${selectedStationId === ss.id ? 'text-emerald-500' : 'text-zinc-400 group-hover:text-emerald-500'}`} />
+                        {selectedStationId === ss.id && (
+                          <motion.div 
+                            layoutId="pin-glow"
+                            className="absolute inset-0 bg-emerald-500/40 rounded-full blur-md"
+                          />
+                        )}
+                        <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-2 bg-zinc-900 border border-zinc-800 rounded-lg transition-opacity whitespace-nowrap z-50 ${selectedStationId === ss.id ? 'opacity-100 scale-110' : 'opacity-0 group-hover:opacity-100'}`}>
+                          <div className="text-xs font-bold text-white">{ss.name}</div>
+                          <div className="text-[10px] text-zinc-500">{ss.distance} • {ss.rating} ★</div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+
+                <div className="absolute top-8 left-8 p-4 bg-zinc-900/80 backdrop-blur-md border border-zinc-700/50 rounded-2xl">
+                  <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest mb-1">Current Location</div>
+                  <div className="text-sm font-bold text-white">40.7128° N, 74.0060° W</div>
+                </div>
+
+                <div className="absolute bottom-8 right-8 flex flex-col gap-2">
+                  <button className="w-10 h-10 bg-zinc-800/80 backdrop-blur-md border border-zinc-700/50 rounded-xl flex items-center justify-center text-white hover:bg-emerald-600 transition-colors">
+                    <Plus className="w-5 h-5" />
+                  </button>
+                  <button className="w-10 h-10 bg-zinc-800/80 backdrop-blur-md border border-zinc-700/50 rounded-xl flex items-center justify-center text-white hover:bg-emerald-600 transition-colors">
+                    <Minus className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : activeView === 'grid' ? (
+            <div className="bg-zinc-900/10 border border-zinc-800/30 p-8 rounded-[3rem]">
+              <div className="grid grid-cols-3 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-6">
+                {modules.map((mod) => (
+                  <motion.button
+                    key={mod.id}
+                    whileHover={{ scale: 1.1, zIndex: 10 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setSelectedModule(mod)}
+                    className={`relative aspect-square rounded-full border-2 transition-all flex flex-col items-center justify-center p-2 ${
+                      mod.status === 'optimal' ? 'bg-emerald-500/5 border-emerald-500/40 text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.15)]' :
+                      mod.status === 'warning' ? 'bg-yellow-500/5 border-yellow-500/40 text-yellow-400 shadow-[0_0_20px_rgba(234,179,8,0.15)]' :
+                      'bg-red-500/5 border-red-500/50 text-red-500 shadow-[0_0_25px_rgba(239,68,68,0.25)]'
+                    } ${aiAnalysis?.badModuleIds?.includes(mod.id) ? 'animate-pulse border-red-500' : ''}`}
+                  >
+                    {aiAnalysis?.badModuleIds?.includes(mod.id) && <AlertTriangle className="w-3 h-3 text-red-500 absolute top-2 right-2" />}
+                    <Battery className={`w-6 h-6 mb-1 transition-colors ${
+                      mod.status === 'optimal' ? 'text-emerald-500' :
+                      mod.status === 'warning' ? 'text-yellow-500' : 'text-red-500'
+                    }`} />
+                    <div className="text-center">
+                      <div className="text-[12px] font-black tracking-tighter leading-tight">{(mod?.avgTemp ?? 25).toFixed(1)}°C</div>
+                      <div className="text-[9px] font-mono opacity-60 uppercase tracking-tighter">{(throttle * 4.5).toFixed(1)}A</div>
+                    </div>
+                    <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[8px] font-mono text-zinc-600 whitespace-nowrap tracking-widest">{mod.name}</div>
+                  </motion.button>
+                ))}
+              </div>
+            </div>
           ) : activeView === 'distribution' ? (
             <div className="bg-zinc-900/50 border border-zinc-800 p-8 rounded-3xl min-h-[600px] space-y-8">
               <div className="flex items-center justify-between border-b border-zinc-800 pb-6">
                 <div>
-                  <h2 className="text-xl font-bold text-white mb-1">DETAILED POWER DISTRIBUTION</h2>
-                  <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Real-time Load Analysis & Efficiency</p>
+                  <h2 className="text-xl font-bold text-white mb-1">EV POWER FLOW</h2>
+                  <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Motor & Inverter Energy Flow</p>
                 </div>
                 <div className="text-right">
-                  <div className="text-3xl font-bold text-emerald-500">
-                    {smartHomeAppliances.reduce((acc, app) => acc + (app.isOn ? app.power : 0), 0).toFixed(1)}W
+                  <div className="text-3xl font-bold text-blue-500">
+                    {(totalLoadPower / 1000).toFixed(1)}kW
                   </div>
-                  <div className="text-[10px] font-mono text-zinc-500 uppercase">Total System Load</div>
+                  <div className="text-[10px] font-mono text-zinc-500 uppercase">Motor Power Output</div>
                 </div>
               </div>
+              
+              <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
+                <PowerSankey 
+                    evChargingPower={evChargingInput || 0}
+                    batteryPower={(modules || []).reduce((acc, m) => acc + ((m.avgVoltage || 0) * (m.cells?.length || 0) * 0.5), 0) || 0}
+                    loadPower={totalLoadPower || 0}
+                    gridPower={gridPower || 0}
+                />
+              </div>
+
+              <ChargingController 
+                  currentPower={evChargingInput}
+                  onPowerChange={setEvChargingInput}
+                  soc={(modules || []).reduce((acc, m) => acc + (m.avgSoc || 0), 0) / (modules?.length || 1)}
+                  totalCapacityWh={(modules || []).reduce((acc, mod) => acc + ((mod.cells?.length || 0) * 5 * 3.7), 0)}
+              />
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Source Analysis */}
                 <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
                   <h3 className="text-xs font-mono uppercase tracking-widest text-zinc-400 mb-6 flex items-center gap-2">
-                    <Sun className="w-4 h-4 text-yellow-500" />
-                    Source Efficiency
+                    <Gauge className="w-4 h-4 text-blue-400" />
+                    Motor Performance
                   </h3>
+                  <div className="flex justify-around items-center mb-6">
+                    <MotorGraphic rpm={motorRpm} label="Front Motor" />
+                    <MotorGraphic rpm={motorRpm * 0.95} label="Rear Motor" />
+                  </div>
                   <div className="space-y-6">
                     <div className="flex justify-between items-end">
                       <div>
-                        <div className="text-[10px] font-mono text-zinc-500 uppercase mb-1">Active Source</div>
-                        <div className={`text-lg font-bold ${powerSource === 'solar' ? 'text-yellow-500' : 'text-emerald-500'}`}>
-                          {powerSource.toUpperCase()}
-                        </div>
+                        <div className="text-[10px] font-mono text-zinc-500 uppercase mb-1">Current RPM</div>
+                        <div className="text-2xl font-black text-white">{Math.round(motorRpm)}</div>
                       </div>
                       <div className="text-right">
-                        <div className="text-[10px] font-mono text-zinc-500 uppercase mb-1">Voltage</div>
-                        <div className="text-lg font-bold">{powerSource === 'solar' ? solarVoltage : totalVoltage}V</div>
+                        <div className="text-[10px] font-mono text-zinc-500 uppercase mb-1">Inverter Frequency</div>
+                        <div className="text-2xl font-black text-blue-400">{(motorRpm / 60).toFixed(1)}Hz</div>
                       </div>
                     </div>
                     <div className="h-2 bg-zinc-900 rounded-full overflow-hidden">
                       <motion.div 
-                        className={`h-full ${powerSource === 'solar' ? 'bg-yellow-500' : 'bg-emerald-500'}`}
-                        initial={{ width: 0 }}
-                        animate={{ width: '100%' }}
-                        transition={{ duration: 1 }}
+                        className="h-full bg-blue-500"
+                        animate={{ width: `${(motorRpm / 16000) * 100}%` }}
                       />
                     </div>
-                    <p className="text-[10px] text-zinc-500 leading-relaxed">
-                      System is currently drawing power from the {powerSource} grid. 
-                      {powerSource === 'solar' ? ' Solar array is providing direct load support while maintaining pack stability.' : ' Battery pack is discharging to meet current load demands.'}
-                    </p>
                   </div>
                 </div>
 
-                {/* Load Analysis */}
                 <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
                   <h3 className="text-xs font-mono uppercase tracking-widest text-zinc-400 mb-6 flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-orange-500" />
-                    Smart Home Loads
+                    <Car className="w-4 h-4 text-blue-400" />
+                    Drive Controls
                   </h3>
-                  <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
-                    {smartHomeAppliances.filter(app => app.isOn).map(app => (
-                      <div key={app.id} className="flex items-center justify-between p-2 bg-zinc-900/50 rounded-lg border border-zinc-800/50">
-                        <div className="text-[10px] font-bold text-white uppercase">{app.name}</div>
-                        <div className="text-[10px] font-mono text-orange-400">{app.power}W</div>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[10px] font-mono uppercase">
+                        <span className="text-zinc-500">Accelerator</span>
+                        <span className="text-blue-400">{throttle}%</span>
                       </div>
-                    ))}
-                    {smartHomeAppliances.filter(app => app.isOn).length === 0 && (
-                      <div className="text-center py-8 text-zinc-600 text-[10px] uppercase font-mono">No active loads</div>
-                    )}
+                      <input 
+                        type="range"
+                        value={throttle}
+                        onChange={(e) => setThrottle(parseInt(e.target.value))}
+                        className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[10px] font-mono uppercase">
+                        <span className="text-zinc-500">Regen Braking</span>
+                        <span className="text-emerald-400">{regenerativeBraking}%</span>
+                      </div>
+                      <input 
+                        type="range"
+                        value={regenerativeBraking}
+                        onChange={(e) => setRegenerativeBraking(parseInt(e.target.value))}
+                        className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* Detailed Flow Diagram (Sankey) */}
-              <div className="bg-zinc-950 p-8 rounded-2xl border border-zinc-800 relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-yellow-500 via-emerald-500 to-orange-500 opacity-20" />
-                
-                <div className="flex flex-col items-center gap-8">
-                  <div className="text-center">
-                    <h3 className="text-xs font-mono uppercase tracking-[0.3em] text-zinc-500 mb-2">Real-time Energy Flow (Sankey)</h3>
-                    <div className="h-px w-24 bg-zinc-800 mx-auto" />
-                  </div>
+              <div className="bg-zinc-950 p-12 rounded-2xl border border-zinc-800 flex flex-col items-center justify-center gap-12 relative overflow-hidden">
+                <div className="relative w-full max-w-2xl h-48 border-2 border-dashed border-zinc-800 rounded-full flex items-center justify-around">
+                   <div className="absolute inset-0 bg-blue-500/5 rounded-full" />
+                   
+                   <div className="relative z-10 flex flex-col items-center gap-2 scale-75">
+                     <div className="flex gap-4">
+                       <MotorGraphic rpm={motorRpm} label="" />
+                       <MotorGraphic rpm={motorRpm * 0.95} label="" />
+                     </div>
+                     <span className="text-[8px] font-mono uppercase tracking-[0.2em] text-zinc-500">Dual Motor Drive</span>
+                   </div>
 
-                  <div className="w-full max-w-3xl aspect-[16/8] bg-zinc-900/20 rounded-3xl border border-zinc-800/50 p-8 flex items-center justify-center">
-                    <PowerSankey 
-                      solarPower={solarChargingPower}
-                      batteryPower={isEmergency ? 0 : (totalLoadPower - solarChargingPower + gridPower)}
-                      loadPower={totalLoadPower}
-                      gridPower={gridPower}
-                      width={700}
-                      height={300}
-                    />
-                  </div>
+                   <div className="flex-1 h-px bg-zinc-800 relative mx-8">
+                     {motorRpm > 0 && (
+                       <motion.div 
+                         initial={{ x: -100 }}
+                         animate={{ x: 100 }}
+                         transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                         className="absolute top-1/2 -translate-y-1/2 w-4 h-1 bg-blue-500 blur-sm"
+                       />
+                     )}
+                   </div>
 
-                  <div className="grid grid-cols-3 gap-12 w-full max-w-2xl">
-                    <div className="text-center">
-                      <div className="text-[10px] font-mono text-zinc-600 uppercase mb-1">Generation</div>
-                      <div className="text-sm font-bold text-yellow-500">{((solarVoltage / 300) * 500).toFixed(1)}W</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-[10px] font-mono text-zinc-600 uppercase mb-1">Storage Delta</div>
-                      <div className={`text-sm font-bold ${(totalLoadPower - ((solarVoltage / 300) * 500)) < 0 ? 'text-emerald-500' : 'text-red-400'}`}>
-                        {(totalLoadPower - ((solarVoltage / 300) * 500)).toFixed(1)}W
-                      </div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-[10px] font-mono text-zinc-600 uppercase mb-1">Consumption</div>
-                      <div className="text-sm font-bold text-orange-500">{totalLoadPower.toFixed(1)}W</div>
-                    </div>
-                  </div>
+                   <div className="relative z-10 flex flex-col items-center gap-2">
+                     <div className="p-4 bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl">
+                       <Battery className="w-8 h-8 text-emerald-500" />
+                     </div>
+                     <span className="text-[8px] font-mono uppercase tracking-[0.2em] text-zinc-500">Main Pack</span>
+                   </div>
                 </div>
               </div>
             </div>
-          ) : (
-            <SmartHome 
-              appliances={smartHomeAppliances} 
-              onToggle={toggleAppliance} 
-              onBack={() => setActiveView('grid')}
-              estimatedTime={calculateRuntime()}
-            />
-          )}
+          ) : activeView === 'architecture' ? (
+            <div className="bg-zinc-900/50 border border-zinc-800 p-8 rounded-3xl min-h-[600px] flex flex-col items-center justify-center text-center">
+               <Monitor className="w-16 h-16 text-zinc-700 mb-4" />
+               <h3 className="text-xl font-bold text-white mb-2 uppercase tracking-tighter">Structural Battery Architecture (4680)</h3>
+               <p className="max-w-md text-sm text-zinc-500 leading-relaxed">
+                 The structural battery pack uses large-format 4680 cells to form a rigid substrate that becomes 
+                 an integral part of the vehicle's body structure.
+               </p>
+               <div className="mt-8 grid grid-cols-2 gap-4 w-full max-w-xl text-left">
+                  <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-xl">
+                    <div className="text-[9px] font-mono text-zinc-500 uppercase mb-2">Cell Assembly</div>
+                    <div className="text-xs text-zinc-300">Cylindrical cells (46mm x 80mm) arranged in a high-density matrix.</div>
+                  </div>
+                  <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-xl">
+                    <div className="text-[9px] font-mono text-zinc-500 uppercase mb-2">Voltage Profile</div>
+                    <div className="text-xs text-zinc-300">400V Nominal architecture with high-voltage busbar connectivity.</div>
+                  </div>
+               </div>
+            </div>
+          ) : null}
         </div>
 
         {/* Right Column: AI Analysis & Capacity Graph */}
@@ -1745,11 +1928,11 @@ const MainApp = ({
                   <div className="grid grid-cols-2 gap-2">
                     <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
                       <div className="text-[10px] font-mono text-zinc-500 uppercase mb-1">Frequency</div>
-                      <div className="text-sm font-bold text-purple-400">{gridFrequency.toFixed(3)}Hz</div>
+                      <div className="text-sm font-bold text-purple-400">{(gridFrequency ?? 60).toFixed(3)}Hz</div>
                     </div>
                     <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
                       <div className="text-[10px] font-mono text-zinc-500 uppercase mb-1">Cyber IQ</div>
-                      <div className={`text-sm font-bold ${cyberSecurityIntegrity > 98 ? 'text-emerald-500' : 'text-red-500'}`}>{cyberSecurityIntegrity.toFixed(1)}%</div>
+                      <div className={`text-sm font-bold ${(cyberSecurityIntegrity ?? 0) > 98 ? 'text-emerald-500' : 'text-red-500'}`}>{(cyberSecurityIntegrity ?? 0).toFixed(1)}%</div>
                     </div>
                   </div>
                   
@@ -1759,6 +1942,37 @@ const MainApp = ({
                   <p className="text-xs text-emerald-500/70 leading-relaxed italic border-l-2 border-emerald-500/30 pl-3">
                     {aiAnalysis.recommendation}
                   </p>
+
+                  {(aiAnalysis.servicePerson || aiAnalysis.serviceLocation) && (
+                    <div className="bg-zinc-950/80 p-3 rounded-xl border border-zinc-800/50 space-y-2">
+                       <div className="flex items-center gap-2">
+                         <User className="w-3 h-3 text-blue-400" />
+                         <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-tighter">Assigned Expert:</span>
+                         <span className="text-[10px] font-bold text-blue-300">{aiAnalysis.servicePerson} ({aiAnalysis.servicePersonRating}/5.0)</span>
+                       </div>
+                       <div 
+                         className="flex items-center gap-2 cursor-pointer group"
+                         onClick={() => {
+                           const station = serviceStations.find(s => s.name === aiAnalysis?.serviceLocation);
+                           if (station) {
+                             setSelectedStationId(station.id);
+                             setActiveView('support');
+                           } else {
+                             setSelectedStationId(serviceStations[0].id);
+                             setActiveView('support');
+                           }
+                         }}
+                       >
+                         <MapPin className="w-3 h-3 text-emerald-400 group-hover:text-emerald-200 transition-colors" />
+                         <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-tighter">Location:</span>
+                         <span className="text-[10px] font-bold text-emerald-300 underline decoration-emerald-500/30 underline-offset-2 group-hover:text-emerald-100 transition-colors">
+                           {aiAnalysis.serviceLocation}
+                           <ExternalLink className="w-2 h-2 inline ml-1 opacity-50" />
+                         </span>
+                       </div>
+                    </div>
+                  )}
+
                   <div className="flex items-center gap-2 text-[8px] font-mono text-zinc-500">
                     <Database className="w-2 h-2" />
                     RESEARCH-DT SYNC: {new Date().toLocaleTimeString()}
@@ -1772,7 +1986,7 @@ const MainApp = ({
                     <Activity className="w-4 h-4 text-emerald-500" />
                     <span className="text-xs font-mono uppercase tracking-widest text-zinc-500">Capacity History</span>
                   </div>
-                  <div className="text-[10px] font-mono text-emerald-500">Avg SOC: {capacityHistory[capacityHistory.length - 1]?.soc || 0}%</div>
+                  <div className="text-[10px] font-mono text-emerald-500">Avg SOC: {capacityHistory[(capacityHistory?.length || 0) - 1]?.soc || 0}%</div>
                 </div>
                 <div className="h-40 w-full">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1817,15 +2031,35 @@ const MainApp = ({
                 className="space-y-6 p-5 rounded-3xl border"
               >
                 <div className="flex items-center justify-between">
-                  <h3 className={`text-xs font-mono uppercase tracking-[0.3em] flex items-center gap-2 ${aiAnalysis?.status === 'critical' ? 'text-red-500' : 'text-purple-500'}`}>
-                    <Brain className={`w-4 h-4 ${aiAnalysis?.status === 'critical' ? 'animate-bounce' : ''}`} />
-                    Digital Twin
-                  </h3>
-                  {isAiAnalyzing && <RefreshCcw className="w-3 h-3 text-purple-500 animate-spin" />}
+                  <div className="flex items-center gap-4">
+                    <h3 className={`text-xs font-mono uppercase tracking-[0.3em] flex items-center gap-2 ${aiAnalysis?.status === 'critical' ? 'text-red-500' : 'text-purple-500'}`}>
+                      <Brain className={`w-4 h-4 ${aiAnalysis?.status === 'critical' ? 'animate-bounce' : ''}`} />
+                      Energy Soul
+                    </h3>
+                    <select 
+                      value={aiLanguage}
+                      onChange={(e: any) => setAiLanguage(e.target.value)}
+                      className="bg-zinc-950 border border-zinc-800 text-[9px] text-zinc-500 rounded px-1.5 py-0.5 outline-none focus:border-purple-500 transition-colors cursor-pointer font-mono"
+                    >
+                      <option value="en">ENG</option>
+                      <option value="hi">HIN</option>
+                      <option value="ta">TAM</option>
+                      <option value="ml">MAL</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => !isAiAnalyzing && runAiAnalysis()}
+                      disabled={isAiAnalyzing}
+                      className={`p-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-800 transition-colors ${isAiAnalyzing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      <RefreshCcw className={`w-3 h-3 text-purple-500 ${isAiAnalyzing ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-10 gap-1 opacity-50 grayscale-[0.5]">
-                  {(aiCells.length > 0 ? aiCells : cells).map((cell) => (
+                  {(modules[0]?.cells || []).map((cell) => cell && (
                     <div
                       key={`ai-${cell.id}`}
                       className={`relative flex items-center justify-center p-1 rounded-full border aspect-square ${getStatusColor(cell)}`}
@@ -1871,20 +2105,148 @@ const MainApp = ({
         </div>
       </main>
 
-      <footer className="max-w-[1600px] mx-auto mt-8 pt-6 border-t border-zinc-900 flex flex-col md:flex-row justify-between items-center gap-4 text-zinc-600 text-[10px] font-mono uppercase tracking-[0.2em]">
+      <AnimatePresence>
+        {selectedModule && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedModule(null)}
+              className="absolute inset-0 bg-black/90 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-6xl bg-zinc-950 border border-zinc-800 rounded-[3rem] overflow-hidden shadow-2xl flex flex-col h-[85vh]"
+            >
+              <div className="p-8 border-b border-zinc-900 flex justify-between items-center bg-zinc-900/20">
+                <div>
+                  <div className="flex items-center gap-3 mb-1">
+                    <Box className="w-6 h-6 text-blue-500" />
+                    <h2 className="text-2xl font-bold text-white uppercase tracking-tighter">{selectedModule.name} Details</h2>
+                  </div>
+                  <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">10-Parallel Optimized Array • Cell Inspection Mode</p>
+                </div>
+                <button 
+                  onClick={() => setSelectedModule(null)}
+                  className="p-3 bg-zinc-900 hover:bg-zinc-800 rounded-full border border-zinc-800 transition-all group"
+                >
+                  <X className="w-5 h-5 text-zinc-400 group-hover:text-white" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-hidden flex gap-8 p-8">
+                {/* Cell Grid */}
+                <div className="flex-1 overflow-y-auto pr-4 custom-scrollbar">
+                  <div className="grid grid-cols-5 md:grid-cols-8 lg:grid-cols-10 gap-5">
+                    {selectedModule.cells.map((cell) => {
+                      const isSelected = selectedCell?.id === cell.id;
+                      return (
+                        <motion.button
+                          key={cell.id}
+                          whileHover={{ scale: 1.15, zIndex: 10 }}
+                          whileTap={{ scale: 0.9 }}
+                          onClick={() => setSelectedCell(cell)}
+                          className={`aspect-square rounded-full border-2 flex flex-col items-center justify-center p-1.5 transition-all relative group ${
+                            cell.status === 'optimal' ? 'bg-emerald-500/5 border-emerald-500/40 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]' :
+                            cell.status === 'warning' ? 'bg-yellow-500/5 border-yellow-500/40 text-yellow-400 shadow-[0_0_15px_rgba(234,179,8,0.2)]' :
+                            'bg-red-500/5 border-red-500/50 text-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)]'
+                          } ${isSelected ? 'ring-2 ring-white border-transparent' : ''} ${aiAnalysis?.badCellIds?.includes(cell.id) ? 'animate-pulse ring-2 ring-red-500 z-10' : ''}`}
+                        >
+                          <div className={`absolute inset-0 rounded-full opacity-20 pointer-events-none ${cell.status === 'optimal' ? 'bg-emerald-500 shadow-[inset_0_0_15px_rgba(16,185,129,0.3)]' : ''}`} />
+                          <Battery className={`w-4 h-4 mb-0.5 ${
+                             cell.status === 'optimal' ? 'text-emerald-500' :
+                             cell.status === 'warning' ? 'text-yellow-500' : 'text-red-500'
+                          }`} />
+                          <div className="text-[11px] font-black tracking-tight leading-none">{(cell?.voltage ?? 3.7).toFixed(1)}V</div>
+                          <div className="text-[8px] font-mono opacity-60 leading-none mt-0.5">{cell.soc}%</div>
+                          {isSelected && (
+                            <motion.div 
+                              layoutId="selection-ring"
+                              className="absolute -inset-1.5 rounded-full border-2 border-white pointer-events-none" 
+                            />
+                          )}
+                        </motion.button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Info Panel */}
+                <div className="w-80 space-y-6">
+                  {selectedCell ? (
+                    <motion.div 
+                      key={selectedCell.id}
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="space-y-6"
+                    >
+                      <div className="p-6 bg-zinc-900 rounded-3xl border border-zinc-800">
+                        <div className="text-[10px] font-mono text-zinc-500 uppercase mb-4 tracking-widest">Cell Diagnostics</div>
+                        <div className="space-y-4">
+                          <div>
+                            <div className="text-[8px] font-mono text-zinc-600 uppercase mb-1">State of Charge</div>
+                            <div className="text-3xl font-black text-white">{selectedCell?.soc ?? 0}%</div>
+                            <div className="w-full h-1 bg-zinc-800 rounded-full mt-2">
+                              <div className="h-full bg-blue-500 rounded-full" style={{ width: `${selectedCell?.soc ?? 0}%` }} />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <div className="text-[8px] font-mono text-zinc-600 uppercase mb-1">Voltage</div>
+                              <div className="text-xl font-bold text-blue-400">{(selectedCell?.voltage ?? 0).toFixed(3)}V</div>
+                            </div>
+                            <div>
+                              <div className="text-[8px] font-mono text-zinc-600 uppercase mb-1">Temp</div>
+                              <div className="text-xl font-bold text-orange-400">{selectedCell?.temperature ?? 0}°C</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-6 bg-zinc-900 rounded-3xl border border-zinc-800">
+                        <div className="text-[10px] font-mono text-zinc-500 uppercase mb-4 tracking-widest">Quick Actions</div>
+                        <div className="space-y-2">
+                          <button 
+                            className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold uppercase rounded-lg transition-all"
+                          >
+                            Rebalance Cell
+                          </button>
+                          <button className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-[10px] font-bold uppercase rounded-lg transition-all">
+                            Isolation Test
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-8 bg-zinc-900 rounded-3xl border border-zinc-800 opacity-50">
+                      <Zap className="w-8 h-8 text-zinc-700 mb-2" />
+                      <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-600">Select a cell to view telemetry</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <footer className="max-w-full px-6 mx-auto mt-8 pt-6 border-t border-zinc-900 flex flex-col md:flex-row justify-between items-center gap-4 text-zinc-600 text-[10px] font-mono uppercase tracking-[0.2em]">
         <div className="flex items-center gap-4">
-          <span>© 2026 Virtual Battery Systems • V2.0.0</span>
+          <span>© 2026 EV Systems Lab • V3.5.0</span>
           {lastSyncStatus && (
-            <span className={`flex items-center gap-1 ${lastSyncStatus.success ? 'text-emerald-500' : 'text-red-500'}`}>
-              <div className={`w-1 h-1 rounded-full ${lastSyncStatus.success ? 'bg-emerald-500' : 'bg-red-500'}`} />
-              Last Sync: {lastSyncStatus.time}
+            <span className={`flex items-center gap-1 ${lastSyncStatus.success ? 'text-blue-500' : 'text-red-500'}`}>
+              <div className={`w-1 h-1 rounded-full ${lastSyncStatus.success ? 'bg-blue-500' : 'bg-red-500'}`} />
+              Telemetry Sync: {lastSyncStatus.time}
             </span>
           )}
         </div>
         <div className="flex gap-6">
-          <a href="/api/battery-pack" target="_blank" className="hover:text-emerald-500 transition-colors">API</a>
+          <a href="#" className="hover:text-blue-500 transition-colors">Documentation</a>
           <span className="text-zinc-800">|</span>
-          <span>Grid: 10x10 (100 Cells)</span>
+          <span>Arch: 50 Packs (2500 Cells)</span>
         </div>
       </footer>
     </div>
